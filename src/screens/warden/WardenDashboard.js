@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { View, Text, ScrollView, TouchableOpacity, FlatList, StyleSheet, Alert } from 'react-native';
+import { View, Text, ScrollView, TouchableOpacity, StyleSheet, Alert } from 'react-native';
 import { Feather } from '@expo/vector-icons';
 import { ScreenHeader, Card, StatusBadge } from '../../components';
 import { useAuth } from '../../context/AuthContext';
@@ -127,10 +127,10 @@ export default function WardenDashboard({ navigation }) {
           <Text style={styles.empty}>No open complaints</Text>
         ) : (
           complaints.map((item) => (
-            <Card key={item.id} style={styles.card}>
+            <Card key={String(item.complaint_id || item.id || `${item.student_id}-${item.created_at}`)} style={styles.card}>
               <View style={styles.cardHeader}>
                 <Text style={styles.cardDetail} numberOfLines={2}>
-                  {item.description}
+                  {item.complaint_text || item.description || 'Complaint'}
                 </Text>
                 <StatusBadge status={item.status} />
               </View>

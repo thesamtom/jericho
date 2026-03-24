@@ -65,10 +65,13 @@ export function AuthProvider({ children }) {
       .from(tableName)
       .select('*')
       .eq(idColumn, roleId)
-      .single();
+      .maybeSingle();
 
     if (lookupError) {
-      console.log('Supabase lookup error:', JSON.stringify(lookupError));
+      // PGRST116 is expected when no matching row exists.
+      if (lookupError.code !== 'PGRST116') {
+        console.log('Supabase lookup error:', JSON.stringify(lookupError));
+      }
       throw new Error(`Login failed: ${lookupError.message}`);
     }
 

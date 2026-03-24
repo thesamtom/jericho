@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   View,
   Text,
@@ -11,6 +11,7 @@ import {
 } from 'react-native';
 import { Feather } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useAuth } from '../context/AuthContext';
 import { InputField, PrimaryButton } from '../components';
 import { colors, typography, spacing, borderRadius } from '../theme';
@@ -31,6 +32,8 @@ const ROLE_ID_PLACEHOLDERS = {
   warden: 'Enter your Warden ID',
 };
 
+const SAVED_LOGINS_KEY = '@jericho_saved_logins_v1';
+
 export default function LoginScreen() {
   const insets = useSafeAreaInsets();
   const { signIn } = useAuth();
@@ -38,6 +41,49 @@ export default function LoginScreen() {
   const [password, setPassword] = useState('');
   const [selectedRole, setSelectedRole] = useState('student');
   const [loading, setLoading] = useState(false);
+  const [rememberMe, setRememberMe] = useState(false);
+  const [savedByRole, setSavedByRole] = useState({});
+  const [savedLoaded, setSavedLoaded] = useState(false);
+
+  useEffect(() => {
+    loadSavedLogins();
+  }, []);
+
+  useEffect(() => {
+    if (!savedLoaded) return;
+
+    const saved = savedByRole[selectedRole];
+    if (saved) {
+      setRoleId(saved.roleId || '');
+      setPassword(saved.password || '');
+      setRememberMe(true);
+      return;
+    }
+
+    // Keep each role isolated so role switching never shows other role credentials.
+    setRoleId('');
+    setPassword('');
+    setRememberMe(false);
+  }, [selectedRole, savedByRole, savedLoaded]);
+
+  async function loadSavedLogins() {
+    try {
+      const raw = await AsyncStorage.getItem(SAVED_LOGINS_KEY);
+      const parsed = raw ? JSON.parse(raw) : {};
+      if (parsed && typeof parsed === 'object') {
+        setSavedByRole(parsed);
+      }
+    } catch {
+      setSavedByRole({});
+    } finally {
+      setSavedLoaded(true);
+    }
+  }
+
+  async function persistSavedLogins(nextValue) {
+    setSavedByRole(nextValue);
+    await AsyncStorage.setItem(SAVED_LOGINS_KEY, JSON.stringify(nextValue));
+  }
 
   async function handleLogin() {
     if (!roleId.trim() || !password.trim()) {
@@ -47,11 +93,38 @@ export default function LoginScreen() {
     setLoading(true);
     try {
       await signIn(roleId.trim(), password, selectedRole);
+
+      const nextSaved = { ...savedByRole };
+      if (rememberMe) {
+        nextSaved[selectedRole] = {
+          roleId: roleId.trim(),
+          password,
+        };
+      } else {
+        delete nextSaved[selectedRole];
+      }
+      await persistSavedLogins(nextSaved);
     } catch (err) {
       Alert.alert('Login Failed', err.message);
     } finally {
       setLoading(false);
     }
+  }
+
+  async function clearSavedLogin() {
+    const savedForRole = savedByRole[selectedRole];
+    if (!savedForRole) {
+      Alert.alert('Info', 'No saved login found for this role');
+      return;
+    }
+
+    const nextSaved = { ...savedByRole };
+    delete nextSaved[selectedRole];
+    await persistSavedLogins(nextSaved);
+    setRoleId('');
+    setPassword('');
+    setRememberMe(false);
+    Alert.alert('Cleared', `Saved ${selectedRole} login removed`);
   }
 
   return (
@@ -116,6 +189,28 @@ export default function LoginScreen() {
               </TouchableOpacity>
             ))}
           </View>
+
+          <TouchableOpacity
+            style={styles.rememberRow}
+            onPress={() => setRememberMe((prev) => !prev)}
+            activeOpacity={0.8}
+          >
+            <Feather
+              name={rememberMe ? 'check-square' : 'square'}
+              size={20}
+              color={rememberMe ? colors.primary.main : colors.neutral.textMuted}
+            />
+            <Text style={styles.rememberText}>Remember me for {selectedRole}</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            onPress={clearSavedLogin}
+            style={styles.clearSavedBtn}
+            activeOpacity={0.8}
+          >
+            <Feather name="trash-2" size={16} color={colors.status.rejected} />
+            <Text style={styles.clearSavedText}>Clear saved login for this role</Text>
+          </TouchableOpacity>
 
           <PrimaryButton
             title="Login"
@@ -194,5 +289,28 @@ const styles = StyleSheet.create({
   },
   roleTextActive: {
     color: '#FFFFFF',
+  },
+  rememberRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginTop: spacing.md,
+  },
+  rememberText: {
+    fontSize: typography.sizes.md,
+    color: colors.neutral.textPrimary,
+    fontWeight: typography.weights.medium,
+  },
+  clearSavedBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginTop: spacing.sm,
+    alignSelf: 'flex-start',
+  },
+  clearSavedText: {
+    fontSize: typography.sizes.sm,
+    color: colors.status.rejected,
+    fontWeight: typography.weights.semibold,
   },
 });

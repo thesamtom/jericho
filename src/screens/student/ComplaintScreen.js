@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { View, Text, FlatList, ScrollView, StyleSheet, Alert } from 'react-native';
+import { View, Text, ScrollView, StyleSheet, Alert } from 'react-native';
 import { ScreenHeader, InputField, PrimaryButton, Card, StatusBadge } from '../../components';
 import { useAuth } from '../../context/AuthContext';
 import { supabase } from '../../lib/supabase';
@@ -7,20 +7,26 @@ import { colors, spacing, typography } from '../../theme';
 
 export default function ComplaintScreen() {
   const { user } = useAuth();
+  const studentId = user?.student_id || user?.id;
   const [complaint, setComplaint] = useState('');
   const [complaints, setComplaints] = useState([]);
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
     loadComplaints();
-  }, []);
+  }, [studentId]);
 
   async function loadComplaints() {
+    if (!studentId) {
+      setComplaints([]);
+      return;
+    }
+
     try {
       const { data, error } = await supabase
         .from('complaint')
         .select('*')
-        .eq('student_id', user?.id)
+        .eq('student_id', studentId)
         .order('created_at', { ascending: false });
       if (error) throw error;
       setComplaints(data || []);
@@ -34,13 +40,81 @@ export default function ComplaintScreen() {
       Alert.alert('Error', 'Please describe your complaint');
       return;
     }
+
+    if (!studentId) {
+      Alert.alert('Error', 'Student account not found. Please sign in again.');
+      return;
+    }
+
     setLoading(true);
     try {
-      const { error } = await supabase.from('complaint').insert({
-        student_id: user?.id,
-        description: complaint.trim(),
+      const complaintText = complaint.trim();
+
+      // Resolve assigned warden for this student (required by complaint table).
+      let resolvedWardenId = user?.warden_id || null;
+
+      if (!resolvedWardenId) {
+        const { data: studentRow } = await supabase
+          .from('student')
+          .select('*')
+          .eq('student_id', studentId)
+          .maybeSingle();
+
+        resolvedWardenId = studentRow?.warden_id || null;
+
+        if (!resolvedWardenId && studentRow?.hostel_id) {
+          const { data: hostelWarden } = await supabase
+            .from('warden')
+            .select('*')
+            .eq('hostel_id', studentRow.hostel_id)
+            .limit(1)
+            .maybeSingle();
+
+          resolvedWardenId = hostelWarden?.warden_id || hostelWarden?.id || null;
+        }
+      }
+
+      if (!resolvedWardenId) {
+        const { data: fallbackWarden } = await supabase
+          .from('warden')
+          .select('*')
+          .limit(1)
+          .maybeSingle();
+
+        resolvedWardenId = fallbackWarden?.warden_id || fallbackWarden?.id || null;
+      }
+
+      if (!resolvedWardenId) {
+        throw new Error('No warden is assigned yet. Please contact admin to map a warden.');
+      }
+
+      const basePayload = {
+        student_id: studentId,
+        warden_id: resolvedWardenId,
         status: 'pending',
+      };
+
+      // Try common schema first (description), then fall back to complaint_text schema.
+      let { error } = await supabase.from('complaint').insert({
+        ...basePayload,
+        description: complaintText,
       });
+
+      if (error) {
+        const message = (error.message || '').toLowerCase();
+        const shouldRetryWithComplaintText =
+          message.includes('complaint_text') ||
+          (message.includes('description') && message.includes('does not exist'));
+
+        if (shouldRetryWithComplaintText) {
+          const retry = await supabase.from('complaint').insert({
+            ...basePayload,
+            complaint_text: complaintText,
+          });
+          error = retry.error;
+        }
+      }
+
       if (error) throw error;
       Alert.alert('Success', 'Complaint submitted');
       setComplaint('');
@@ -79,10 +153,10 @@ export default function ComplaintScreen() {
           <Text style={styles.empty}>No complaints yet</Text>
         ) : (
           complaints.map((item) => (
-            <Card key={item.id} style={styles.historyCard}>
+            <Card key={String(item.complaint_id || item.id || `${item.student_id}-${item.created_at}`)} style={styles.historyCard}>
               <View style={styles.historyRow}>
                 <Text style={styles.historyText} numberOfLines={2}>
-                  {item.description}
+                  {item.complaint_text || item.description || 'Complaint'}
                 </Text>
                 <StatusBadge status={item.status} />
               </View>
