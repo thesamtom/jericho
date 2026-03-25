@@ -29,17 +29,32 @@ export default function MovementRequest({ navigation }) {
   const [showReturnDatePicker, setShowReturnDatePicker] = useState(false);
   const [showReturnTimePicker, setShowReturnTimePicker] = useState(false);
 
-  function formatDate(date) {
+  function formatDateForApi(date) {
     const year = date.getFullYear();
     const month = String(date.getMonth() + 1).padStart(2, '0');
     const day = String(date.getDate()).padStart(2, '0');
     return `${year}-${month}-${day}`;
   }
 
-  function formatTime(date) {
+  function formatTimeForApi(date) {
     const hours = String(date.getHours()).padStart(2, '0');
     const minutes = String(date.getMinutes()).padStart(2, '0');
     return `${hours}:${minutes}`;
+  }
+
+  function formatDateForDisplay(date) {
+    const day = String(date.getDate()).padStart(2, '0');
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const year = date.getFullYear();
+    return `${day}-${month}-${year}`;
+  }
+
+  function formatTimeForDisplay(date) {
+    const hours24 = date.getHours();
+    const minutes = String(date.getMinutes()).padStart(2, '0');
+    const ampm = hours24 >= 12 ? 'PM' : 'AM';
+    const hours12 = hours24 % 12 || 12;
+    return `${String(hours12).padStart(2, '0')}:${minutes} ${ampm}`;
   }
 
   async function handleSubmit() {
@@ -55,10 +70,10 @@ export default function MovementRequest({ navigation }) {
     try {
       const { error } = await supabase.from('movement_request').insert({
         student_id: user?.student_id || user?.id,
-        leave_date: formatDate(leaveDate),
-        leave_time: formatTime(leaveTime),
-        return_date: formatDate(returnDate),
-        return_time: formatTime(returnTime),
+        leave_date: formatDateForApi(leaveDate),
+        leave_time: formatTimeForApi(leaveTime),
+        return_date: formatDateForApi(returnDate),
+        return_time: formatTimeForApi(returnTime),
         reason: reason.trim(),
         warden_status: 'pending',
         parent_status: 'pending',
@@ -88,7 +103,7 @@ export default function MovementRequest({ navigation }) {
           >
             <Feather name="calendar" size={18} color={colors.neutral.textMuted} />
             <Text style={leaveDate ? styles.dateText : styles.placeholderText}>
-              {leaveDate ? formatDate(leaveDate) : 'YYYY-MM-DD'}
+              {leaveDate ? formatDateForDisplay(leaveDate) : 'DD-MM-YYYY'}
             </Text>
           </TouchableOpacity>
           {showLeaveDatePicker && (
@@ -111,7 +126,7 @@ export default function MovementRequest({ navigation }) {
           >
             <Feather name="clock" size={18} color={colors.neutral.textMuted} />
             <Text style={leaveTime ? styles.dateText : styles.placeholderText}>
-              {leaveTime ? formatTime(leaveTime) : 'HH:MM'}
+              {leaveTime ? formatTimeForDisplay(leaveTime) : 'HH:MM AM/PM'}
             </Text>
           </TouchableOpacity>
           {showLeaveTimePicker && (
@@ -134,7 +149,7 @@ export default function MovementRequest({ navigation }) {
           >
             <Feather name="calendar" size={18} color={colors.neutral.textMuted} />
             <Text style={returnDate ? styles.dateText : styles.placeholderText}>
-              {returnDate ? formatDate(returnDate) : 'YYYY-MM-DD'}
+              {returnDate ? formatDateForDisplay(returnDate) : 'DD-MM-YYYY'}
             </Text>
           </TouchableOpacity>
           {showReturnDatePicker && (
@@ -157,7 +172,7 @@ export default function MovementRequest({ navigation }) {
           >
             <Feather name="clock" size={18} color={colors.neutral.textMuted} />
             <Text style={returnTime ? styles.dateText : styles.placeholderText}>
-              {returnTime ? formatTime(returnTime) : 'HH:MM'}
+              {returnTime ? formatTimeForDisplay(returnTime) : 'HH:MM AM/PM'}
             </Text>
           </TouchableOpacity>
           {showReturnTimePicker && (

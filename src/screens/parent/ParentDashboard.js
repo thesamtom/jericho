@@ -157,6 +157,10 @@ export default function ParentDashboard() {
     }
   }
 
+  const normalizedPresence = String(studentInfo?.status || '').toLowerCase();
+  const isPresentInHostel = normalizedPresence === 'present';
+  const presenceLabel = isPresentInHostel ? 'Present in Hostel' : 'Outside Hostel';
+
   return (
     <View style={styles.flex}>
       <ScreenHeader title="Parent Panel" subtitle={`Welcome, ${user?.email || 'Parent'}`} />
@@ -185,6 +189,18 @@ export default function ParentDashboard() {
           <View style={styles.infoRow}>
             <Text style={styles.infoLabel}>Room</Text>
             <Text style={styles.infoValue}>{studentInfo?.room_no || '—'}</Text>
+          </View>
+          <View style={[styles.infoRow, styles.infoRowNoBorder]}>
+            <Text style={styles.infoLabel}>Hostel Presence</Text>
+            <View style={styles.presenceWrap}>
+              <View
+                style={[
+                  styles.presenceDot,
+                  { backgroundColor: isPresentInHostel ? colors.status.approved : colors.status.rejected },
+                ]}
+              />
+              <Text style={styles.infoValue}>{presenceLabel}</Text>
+            </View>
           </View>
         </Card>
 
@@ -263,9 +279,23 @@ const styles = StyleSheet.create({
   infoRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
+    alignItems: 'center',
     paddingVertical: 6,
     borderBottomWidth: 1,
     borderBottomColor: colors.neutral.border,
+  },
+  infoRowNoBorder: {
+    borderBottomWidth: 0,
+  },
+  presenceWrap: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  presenceDot: {
+    width: 10,
+    height: 10,
+    borderRadius: 5,
   },
   infoLabel: {
     fontSize: typography.sizes.md,

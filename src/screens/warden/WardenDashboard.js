@@ -279,10 +279,10 @@ export default function WardenDashboard({ navigation }) {
           recentRequests.map((req) => (
             <Card key={String(req.request_id || `${req.student_id}-${req.created_at}`)} style={styles.requestCard}>
               <View style={styles.requestRow}>
-                <Text style={styles.requestReason}>{req.reason || 'Movement Request'}</Text>
+                <Text style={styles.requestStudentName}>{req.studentName || `Student ${req.studentCode || ''}`}</Text>
                 <StatusBadge status="pending" />
               </View>
-              <Text style={styles.requestMeta}>Student: {req.studentName}</Text>
+              <Text style={styles.requestReason}>{req.reason || 'Movement Request'}</Text>
               <Text style={styles.requestMeta}>Student ID: {req.studentCode}</Text>
               <Text style={styles.requestDate}>
                 {formatDateRangeDisplay(req.leave_date, req.return_date, req.leave_time, req.return_time)}
@@ -409,12 +409,17 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginBottom: 4,
   },
-  requestReason: {
-    fontSize: typography.sizes.md,
+  requestStudentName: {
+    fontSize: typography.sizes.xl,
     fontWeight: typography.weights.semibold,
     color: colors.neutral.textPrimary,
     flex: 1,
     marginRight: 8,
+  },
+  requestReason: {
+    fontSize: typography.sizes.sm,
+    color: colors.neutral.textSecondary,
+    marginBottom: 2,
   },
   requestDate: {
     fontSize: typography.sizes.sm,
