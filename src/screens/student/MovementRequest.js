@@ -57,15 +57,64 @@ export default function MovementRequest({ navigation }) {
     return `${String(hours12).padStart(2, '0')}:${minutes} ${ampm}`;
   }
 
-  async function handleSubmit() {
+  function validateDateTimeRange() {
     if (!leaveDate || !leaveTime || !returnDate || !returnTime) {
-      Alert.alert('Error', 'Please select all date and time fields');
-      return;
+      return {
+        isValid: false,
+        error: 'Please select all date and time fields',
+      };
     }
+
     if (!reason.trim()) {
-      Alert.alert('Error', 'Please provide a reason for your request');
+      return {
+        isValid: false,
+        error: 'Please provide a reason for your request',
+      };
+    }
+
+    const leaveDateOnly = formatDateForApi(leaveDate);
+    const returnDateOnly = formatDateForApi(returnDate);
+
+    const leaveDateTime = new Date(`${leaveDateOnly}T${formatTimeForApi(leaveTime)}`);
+    const returnDateTime = new Date(`${returnDateOnly}T${formatTimeForApi(returnTime)}`);
+
+    if (returnDateTime < leaveDateTime) {
+      return {
+        isValid: false,
+        error: 'Return date and time cannot be before leave date and time. Please check your dates and times.',
+      };
+    }
+
+    if (leaveDateOnly === returnDateOnly) {
+      const leaveHours = leaveTime.getHours();
+      const leaveMinutes = leaveTime.getMinutes();
+      const returnHours = returnTime.getHours();
+      const returnMinutes = returnTime.getMinutes();
+
+      const leaveTimeInMinutes = leaveHours * 60 + leaveMinutes;
+      const returnTimeInMinutes = returnHours * 60 + returnMinutes;
+
+      if (returnTimeInMinutes <= leaveTimeInMinutes) {
+        return {
+          isValid: false,
+          error: 'On the same day, return time must be after leave time.',
+        };
+      }
+    }
+
+    return {
+      isValid: true,
+      error: null,
+    };
+  }
+
+  async function handleSubmit() {
+    const validation = validateDateTimeRange();
+    if (!validation.isValid) {
+      Alert.alert('Invalid Date/Time', validation.error);
       return;
     }
+
     setLoading(true);
     try {
       const { error } = await supabase.from('movement_request').insert({
