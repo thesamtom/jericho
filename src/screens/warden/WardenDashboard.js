@@ -17,11 +17,59 @@ import { supabase } from '../../lib/supabase';
 import { formatDateRangeDisplay, formatTimeDisplay } from '../../lib/dateTime';
 import { colors, spacing, typography, borderRadius, shadows } from '../../theme';
 
+function toDateTime(dateValue, timeValue) {
+  if (!dateValue) return null;
+  const date = String(dateValue).trim();
+  const time = String(timeValue || '00:00:00').trim();
+  const normalizedTime = time.length === 5 ? `${time}:00` : time;
+  const parsed = new Date(`${date}T${normalizedTime}`);
+  return Number.isNaN(parsed.getTime()) ? null : parsed;
+}
+
+function formatDateLabel(date) {
+  if (!(date instanceof Date) || Number.isNaN(date.getTime())) return '—';
+  return date.toLocaleDateString('en-IN', {
+    day: '2-digit',
+    month: 'short',
+    year: 'numeric',
+  });
+}
+
+function formatTimeLabel(date) {
+  if (!(date instanceof Date) || Number.isNaN(date.getTime())) return '—';
+  return date
+    .toLocaleTimeString('en-IN', {
+      hour: 'numeric',
+      minute: '2-digit',
+      hour12: true,
+    })
+    .toUpperCase();
+}
+
+function formatWardenRequestWindow(req) {
+  const leaveAt = toDateTime(req?.leave_date, req?.leave_time);
+  const returnAt = toDateTime(req?.return_date, req?.return_time);
+
+  if (!leaveAt || !returnAt) {
+    return formatDateRangeDisplay(req?.leave_date, req?.return_date, req?.leave_time, req?.return_time);
+  }
+
+  const leaveDate = formatDateLabel(leaveAt);
+  const returnDate = formatDateLabel(returnAt);
+  const leaveTime = formatTimeLabel(leaveAt);
+  const returnTime = formatTimeLabel(returnAt);
+
+  if (leaveDate === returnDate) {
+    return `${leaveDate} | ${leaveTime} - ${returnTime}`;
+  }
+
+  return `${leaveDate}, ${leaveTime} -> ${returnDate}, ${returnTime}`;
+}
+
 export default function WardenDashboard({ navigation }) {
   const { user } = useAuth();
   const [recentRequests, setRecentRequests] = useState([]);
   const [hostelId, setHostelId] = useState(null);
-  const [hostelStatus, setHostelStatus] = useState('Not Assigned');
   const [refreshing, setRefreshing] = useState(false);
   const [lastUpdatedAt, setLastUpdatedAt] = useState(null);
   const [lastRefreshMs, setLastRefreshMs] = useState(0);
@@ -67,7 +115,6 @@ export default function WardenDashboard({ navigation }) {
     try {
       const resolvedHostelId = await resolveWardenHostelId();
       setHostelId(resolvedHostelId);
-      setHostelStatus(resolvedHostelId ? 'Active' : 'Not Assigned');
 
       if (resolvedHostelId) {
         const { data: studentRows, error: studentError } = await supabase
@@ -240,21 +287,6 @@ export default function WardenDashboard({ navigation }) {
           </Text>
         ) : null}
 
-        <Card style={styles.statusCard}>
-          <View style={styles.statusRow}>
-            <View>
-              <Text style={styles.statusLabel}>Hostel Status</Text>
-              <Text style={styles.statusValue}>{hostelStatus}</Text>
-            </View>
-            <View
-              style={[
-                styles.statusDot,
-                { backgroundColor: hostelStatus === 'Active' ? colors.status.approved : colors.status.rejected },
-              ]}
-            />
-          </View>
-        </Card>
-
         <Text style={styles.sectionTitle}>Quick Actions</Text>
         <View style={styles.actionsRow}>
           {quickActions.map((action) => (
@@ -285,7 +317,7 @@ export default function WardenDashboard({ navigation }) {
               <Text style={styles.requestReason}>{req.reason || 'Movement Request'}</Text>
               <Text style={styles.requestMeta}>Student ID: {req.studentCode}</Text>
               <Text style={styles.requestDate}>
-                {formatDateRangeDisplay(req.leave_date, req.return_date, req.leave_time, req.return_time)}
+                {formatWardenRequestWindow(req)}
               </Text>
 
               <View style={styles.buttonRow}>
@@ -344,27 +376,6 @@ const styles = StyleSheet.create({
     fontSize: typography.sizes.sm,
     color: colors.neutral.textMuted,
     marginBottom: spacing.sm,
-  },
-  statusCard: { marginBottom: spacing.sectionGap },
-  statusRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-  },
-  statusLabel: {
-    fontSize: typography.sizes.md,
-    color: colors.neutral.textSecondary,
-  },
-  statusValue: {
-    fontSize: typography.sizes.xl,
-    fontWeight: typography.weights.bold,
-    color: colors.neutral.textPrimary,
-    marginTop: 2,
-  },
-  statusDot: {
-    width: 14,
-    height: 14,
-    borderRadius: 7,
   },
   sectionTitle: {
     fontSize: typography.sizes.xl,
