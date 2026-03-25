@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { View, Text, FlatList, StyleSheet } from 'react-native';
+import { View, Text, FlatList, StyleSheet, Alert, Platform, ToastAndroid } from 'react-native';
 import { Feather } from '@expo/vector-icons';
 import { ScreenHeader, StatusBadge } from '../../components';
 import { supabase } from '../../lib/supabase';
@@ -9,12 +9,23 @@ export default function StudentMovementHistory({ route }) {
   const { studentId, studentName } = route.params;
   const [requests, setRequests] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [lastRefreshMs, setLastRefreshMs] = useState(0);
+
+  function showRefreshError() {
+    const message = 'Failed to refresh. Try again.';
+    if (Platform.OS === 'android') {
+      ToastAndroid.show(message, ToastAndroid.SHORT);
+      return;
+    }
+    Alert.alert('Refresh Failed', message);
+  }
 
   useEffect(() => {
     loadRequests();
   }, []);
 
-  async function loadRequests() {
+  async function loadRequests({ isRefresh = false, showError = false } = {}) {
     try {
       const { data, error } = await supabase
         .from('movement_request')
@@ -23,13 +34,25 @@ export default function StudentMovementHistory({ route }) {
         .order('date', { ascending: false });
       if (error) {
         console.log('Load requests error:', JSON.stringify(error));
+        if (showError) showRefreshError();
       }
       setRequests(data || []);
     } catch {
-      setRequests([]);
+      if (showError) showRefreshError();
+      if (!isRefresh) setRequests([]);
     } finally {
-      setLoading(false);
+      if (!isRefresh) setLoading(false);
     }
+  }
+
+  async function handleRefresh() {
+    if (refreshing) return;
+    const now = Date.now();
+    if (now - lastRefreshMs < 1200) return;
+    setRefreshing(true);
+    await loadRequests({ isRefresh: true, showError: true });
+    setRefreshing(false);
+    setLastRefreshMs(Date.now());
   }
 
   function renderRequest({ item }) {
@@ -64,6 +87,8 @@ export default function StudentMovementHistory({ route }) {
         data={requests}
         keyExtractor={(item) => String(item.request_id)}
         renderItem={renderRequest}
+        refreshing={refreshing}
+        onRefresh={handleRefresh}
         contentContainerStyle={styles.list}
         ListEmptyComponent={
           <View style={styles.emptyWrap}>

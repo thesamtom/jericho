@@ -1,5 +1,15 @@
 import React, { useEffect, useState } from 'react';
-import { View, Text, ScrollView, TouchableOpacity, StyleSheet } from 'react-native';
+import {
+  View,
+  Text,
+  ScrollView,
+  TouchableOpacity,
+  StyleSheet,
+  RefreshControl,
+  Alert,
+  Platform,
+  ToastAndroid,
+} from 'react-native';
 import { Feather } from '@expo/vector-icons';
 import { ScreenHeader, Card, StatusBadge } from '../../components';
 import { useAuth } from '../../context/AuthContext';
@@ -10,12 +20,24 @@ export default function StudentDashboard({ navigation }) {
   const { user } = useAuth();
   const [hostelStatus, setHostelStatus] = useState('Present');
   const [recentRequests, setRecentRequests] = useState([]);
+  const [refreshing, setRefreshing] = useState(false);
+  const [lastUpdatedAt, setLastUpdatedAt] = useState(null);
+  const [lastRefreshMs, setLastRefreshMs] = useState(0);
 
   useEffect(() => {
     loadData();
   }, []);
 
-  async function loadData() {
+  function showRefreshError() {
+    const message = 'Failed to refresh. Try again.';
+    if (Platform.OS === 'android') {
+      ToastAndroid.show(message, ToastAndroid.SHORT);
+      return;
+    }
+    Alert.alert('Refresh Failed', message);
+  }
+
+  async function loadData({ showError = false } = {}) {
     try {
       const studentId = user?.student_id || user?.id;
       const today = new Date().toISOString().split('T')[0];
@@ -43,9 +65,24 @@ export default function StudentDashboard({ navigation }) {
         .order('created_at', { ascending: false })
         .limit(5);
       if (requests) setRecentRequests(requests);
+      setLastUpdatedAt(new Date());
+      return true;
     } catch {
-      // Tables may not exist yet
+      if (showError) showRefreshError();
+      return false;
     }
+  }
+
+  async function handleRefresh() {
+    if (refreshing) return;
+
+    const now = Date.now();
+    if (now - lastRefreshMs < 1200) return;
+
+    setRefreshing(true);
+    await loadData({ showError: true });
+    setRefreshing(false);
+    setLastRefreshMs(Date.now());
   }
 
   const quickActions = [
@@ -57,7 +94,17 @@ export default function StudentDashboard({ navigation }) {
   return (
     <View style={styles.flex}>
       <ScreenHeader title="Student Portal" subtitle={`Welcome, ${user?.email || 'Student'}`} />
-      <ScrollView contentContainerStyle={styles.content}>
+      <ScrollView
+        contentContainerStyle={styles.content}
+        refreshControl={
+          <RefreshControl refreshing={refreshing} onRefresh={handleRefresh} enabled={!refreshing} />
+        }
+      >
+        {lastUpdatedAt ? (
+          <Text style={styles.lastUpdated}>
+            Last updated at {lastUpdatedAt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+          </Text>
+        ) : null}
         {/* Hostel Status */}
         <Card style={styles.statusCard}>
           <View style={styles.statusRow}>
@@ -114,6 +161,11 @@ export default function StudentDashboard({ navigation }) {
 const styles = StyleSheet.create({
   flex: { flex: 1, backgroundColor: colors.neutral.surface },
   content: { padding: spacing.screenPadding },
+  lastUpdated: {
+    fontSize: typography.sizes.sm,
+    color: colors.neutral.textMuted,
+    marginBottom: spacing.sm,
+  },
   statusCard: { marginBottom: spacing.sectionGap },
   statusRow: {
     flexDirection: 'row',

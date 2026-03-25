@@ -1,5 +1,15 @@
 import React, { useEffect, useState } from 'react';
-import { View, Text, ScrollView, TouchableOpacity, StyleSheet, Alert } from 'react-native';
+import {
+  View,
+  Text,
+  ScrollView,
+  TouchableOpacity,
+  StyleSheet,
+  Alert,
+  RefreshControl,
+  Platform,
+  ToastAndroid,
+} from 'react-native';
 import { Feather } from '@expo/vector-icons';
 import { ScreenHeader, Card, StatusBadge, PrimaryButton } from '../../components';
 import { useAuth } from '../../context/AuthContext';
@@ -11,12 +21,24 @@ export default function ParentDashboard({ navigation }) {
   const [studentInfo, setStudentInfo] = useState(null);
   const [pendingRequests, setPendingRequests] = useState([]);
   const [fees, setFees] = useState([]);
+  const [refreshing, setRefreshing] = useState(false);
+  const [lastUpdatedAt, setLastUpdatedAt] = useState(null);
+  const [lastRefreshMs, setLastRefreshMs] = useState(0);
 
   useEffect(() => {
     loadData();
   }, []);
 
-  async function loadData() {
+  function showRefreshError() {
+    const message = 'Failed to refresh. Try again.';
+    if (Platform.OS === 'android') {
+      ToastAndroid.show(message, ToastAndroid.SHORT);
+      return;
+    }
+    Alert.alert('Refresh Failed', message);
+  }
+
+  async function loadData({ isRefresh = false, showError = false } = {}) {
     try {
       const parentId = user?.parent_id || user?.id;
 
@@ -56,9 +78,27 @@ export default function ParentDashboard({ navigation }) {
         .eq('student_id', student.student_id)
         .eq('status', 'pending');
       if (feeData) setFees(feeData);
+      setLastUpdatedAt(new Date());
     } catch {
-      // Tables may not exist yet
+      if (showError) showRefreshError();
+      if (!isRefresh) {
+        setStudentInfo(null);
+        setPendingRequests([]);
+        setFees([]);
+      }
     }
+  }
+
+  async function handleRefresh() {
+    if (refreshing) return;
+
+    const now = Date.now();
+    if (now - lastRefreshMs < 1200) return;
+
+    setRefreshing(true);
+    await loadData({ isRefresh: true, showError: true });
+    setRefreshing(false);
+    setLastRefreshMs(Date.now());
   }
 
   async function handleApproval(requestId, action) {
@@ -78,7 +118,17 @@ export default function ParentDashboard({ navigation }) {
   return (
     <View style={styles.flex}>
       <ScreenHeader title="Parent Panel" subtitle={`Welcome, ${user?.email || 'Parent'}`} />
-      <ScrollView contentContainerStyle={styles.content}>
+      <ScrollView
+        contentContainerStyle={styles.content}
+        refreshControl={
+          <RefreshControl refreshing={refreshing} onRefresh={handleRefresh} enabled={!refreshing} />
+        }
+      >
+        {lastUpdatedAt ? (
+          <Text style={styles.lastUpdated}>
+            Last updated at {lastUpdatedAt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+          </Text>
+        ) : null}
         {/* Student Info */}
         <Card style={styles.infoCard}>
           <Text style={styles.cardTitle}>Student Information</Text>
@@ -155,6 +205,11 @@ export default function ParentDashboard({ navigation }) {
 const styles = StyleSheet.create({
   flex: { flex: 1, backgroundColor: colors.neutral.surface },
   content: { padding: spacing.screenPadding },
+  lastUpdated: {
+    fontSize: typography.sizes.sm,
+    color: colors.neutral.textMuted,
+    marginBottom: spacing.sm,
+  },
   infoCard: { marginBottom: spacing.sectionGap },
   cardTitle: {
     fontSize: typography.sizes.xl,

@@ -1,5 +1,15 @@
 import React, { useCallback, useMemo, useState } from 'react';
-import { View, Text, ScrollView, TouchableOpacity, StyleSheet, Alert } from 'react-native';
+import {
+  View,
+  Text,
+  ScrollView,
+  TouchableOpacity,
+  StyleSheet,
+  Alert,
+  RefreshControl,
+  Platform,
+  ToastAndroid,
+} from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import { ScreenHeader, Card, StatusBadge } from '../../components';
 import { useAuth } from '../../context/AuthContext';
@@ -105,6 +115,9 @@ export default function WardenComplaintsScreen({ navigation }) {
   const [statusFilter, setStatusFilter] = useState('all');
   const [dateFilter, setDateFilter] = useState('all');
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [lastUpdatedAt, setLastUpdatedAt] = useState(null);
+  const [lastRefreshMs, setLastRefreshMs] = useState(0);
 
   useFocusEffect(
     useCallback(() => {
@@ -135,8 +148,17 @@ export default function WardenComplaintsScreen({ navigation }) {
     return byId.data?.hostel_id || null;
   }
 
-  async function loadComplaints() {
-    setLoading(true);
+  function showRefreshError() {
+    const message = 'Failed to refresh. Try again.';
+    if (Platform.OS === 'android') {
+      ToastAndroid.show(message, ToastAndroid.SHORT);
+      return;
+    }
+    Alert.alert('Refresh Failed', message);
+  }
+
+  async function loadComplaints({ isRefresh = false, showError = true } = {}) {
+    if (!isRefresh) setLoading(true);
     try {
       const resolvedHostelId = await resolveWardenHostelId();
       setHostelId(resolvedHostelId);
@@ -179,13 +201,24 @@ export default function WardenComplaintsScreen({ navigation }) {
       );
 
       setComplaints(filteredByHostel);
+      setLastUpdatedAt(new Date());
     } catch (err) {
-      Alert.alert('Error', err.message || 'Failed to load complaints');
-      setComplaints([]);
-      setStudentsById({});
+      if (showError) showRefreshError();
     } finally {
-      setLoading(false);
+      if (!isRefresh) setLoading(false);
     }
+  }
+
+  async function handleRefresh() {
+    if (refreshing) return;
+
+    const now = Date.now();
+    if (now - lastRefreshMs < 1200) return;
+
+    setRefreshing(true);
+    await loadComplaints({ isRefresh: true, showError: true });
+    setRefreshing(false);
+    setLastRefreshMs(Date.now());
   }
 
   const filteredComplaints = useMemo(() => {
@@ -253,7 +286,17 @@ export default function WardenComplaintsScreen({ navigation }) {
         subtitle="View and manage student complaints"
       />
 
-      <ScrollView contentContainerStyle={styles.content}>
+      <ScrollView
+        contentContainerStyle={styles.content}
+        refreshControl={
+          <RefreshControl refreshing={refreshing} onRefresh={handleRefresh} enabled={!refreshing} />
+        }
+      >
+        {lastUpdatedAt ? (
+          <Text style={styles.lastUpdated}>
+            Last updated at {lastUpdatedAt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+          </Text>
+        ) : null}
         <Card style={styles.filterCard}>
           <Text style={styles.filterTitle}>Filters</Text>
 
@@ -318,6 +361,11 @@ export default function WardenComplaintsScreen({ navigation }) {
 const styles = StyleSheet.create({
   flex: { flex: 1, backgroundColor: colors.neutral.surface },
   content: { padding: spacing.screenPadding, paddingBottom: spacing.xl },
+  lastUpdated: {
+    fontSize: typography.sizes.sm,
+    color: colors.neutral.textMuted,
+    marginBottom: spacing.sm,
+  },
   filterCard: { marginBottom: spacing.sectionGap },
   filterTitle: {
     fontSize: typography.sizes.xl,

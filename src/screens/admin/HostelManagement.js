@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { View, Text, FlatList, StyleSheet } from 'react-native';
+import { View, Text, FlatList, StyleSheet, Alert, Platform, ToastAndroid } from 'react-native';
 import { ScreenHeader, Card } from '../../components';
 import { supabase } from '../../lib/supabase';
 import { colors, spacing, typography } from '../../theme';
@@ -7,12 +7,23 @@ import { colors, spacing, typography } from '../../theme';
 export default function HostelManagement() {
   const [hostels, setHostels] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [lastRefreshMs, setLastRefreshMs] = useState(0);
+
+  function showRefreshError() {
+    const message = 'Failed to refresh. Try again.';
+    if (Platform.OS === 'android') {
+      ToastAndroid.show(message, ToastAndroid.SHORT);
+      return;
+    }
+    Alert.alert('Refresh Failed', message);
+  }
 
   useEffect(() => {
     loadHostels();
   }, []);
 
-  async function loadHostels() {
+  async function loadHostels({ isRefresh = false, showError = false } = {}) {
     try {
       const { data, error } = await supabase
         .from('hostel')
@@ -21,10 +32,21 @@ export default function HostelManagement() {
       if (error) throw error;
       setHostels(data || []);
     } catch {
-      setHostels([]);
+      if (showError) showRefreshError();
+      if (!isRefresh) setHostels([]);
     } finally {
-      setLoading(false);
+      if (!isRefresh) setLoading(false);
     }
+  }
+
+  async function handleRefresh() {
+    if (refreshing) return;
+    const now = Date.now();
+    if (now - lastRefreshMs < 1200) return;
+    setRefreshing(true);
+    await loadHostels({ isRefresh: true, showError: true });
+    setRefreshing(false);
+    setLastRefreshMs(Date.now());
   }
 
   function renderHostel({ item }) {
@@ -44,6 +66,8 @@ export default function HostelManagement() {
         data={hostels}
         keyExtractor={(item) => String(item.id)}
         renderItem={renderHostel}
+        refreshing={refreshing}
+        onRefresh={handleRefresh}
         contentContainerStyle={styles.list}
         ListEmptyComponent={
           <Text style={styles.empty}>

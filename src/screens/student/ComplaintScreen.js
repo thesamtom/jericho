@@ -1,5 +1,15 @@
 import React, { useEffect, useState } from 'react';
-import { View, Text, ScrollView, StyleSheet, Alert, TouchableOpacity } from 'react-native';
+import {
+  View,
+  Text,
+  ScrollView,
+  StyleSheet,
+  Alert,
+  TouchableOpacity,
+  RefreshControl,
+  Platform,
+  ToastAndroid,
+} from 'react-native';
 import { ScreenHeader, InputField, PrimaryButton, Card, StatusBadge } from '../../components';
 import { useAuth } from '../../context/AuthContext';
 import { supabase } from '../../lib/supabase';
@@ -19,15 +29,27 @@ export default function ComplaintScreen() {
   const [complaints, setComplaints] = useState([]);
   const [loading, setLoading] = useState(false);
   const [selectedFilter, setSelectedFilter] = useState('all');
+  const [refreshing, setRefreshing] = useState(false);
+  const [lastUpdatedAt, setLastUpdatedAt] = useState(null);
+  const [lastRefreshMs, setLastRefreshMs] = useState(0);
 
   useEffect(() => {
     loadComplaints();
   }, [studentId]);
 
-  async function loadComplaints() {
+  function showRefreshError() {
+    const message = 'Failed to refresh. Try again.';
+    if (Platform.OS === 'android') {
+      ToastAndroid.show(message, ToastAndroid.SHORT);
+      return;
+    }
+    Alert.alert('Refresh Failed', message);
+  }
+
+  async function loadComplaints({ showError = false } = {}) {
     if (!studentId) {
       setComplaints([]);
-      return;
+      return false;
     }
 
     try {
@@ -38,9 +60,24 @@ export default function ComplaintScreen() {
         .order('created_at', { ascending: false });
       if (error) throw error;
       setComplaints(data || []);
+      setLastUpdatedAt(new Date());
+      return true;
     } catch {
-      setComplaints([]);
+      if (showError) showRefreshError();
+      return false;
     }
+  }
+
+  async function handleRefresh() {
+    if (refreshing) return;
+
+    const now = Date.now();
+    if (now - lastRefreshMs < 1200) return;
+
+    setRefreshing(true);
+    await loadComplaints({ showError: true });
+    setRefreshing(false);
+    setLastRefreshMs(Date.now());
   }
 
   async function handleSubmit() {
@@ -137,7 +174,17 @@ export default function ComplaintScreen() {
   return (
     <View style={styles.flex}>
       <ScreenHeader title="Complaints" subtitle="Raise and track complaints" />
-      <ScrollView contentContainerStyle={styles.content}>
+      <ScrollView
+        contentContainerStyle={styles.content}
+        refreshControl={
+          <RefreshControl refreshing={refreshing} onRefresh={handleRefresh} enabled={!refreshing} />
+        }
+      >
+        {lastUpdatedAt ? (
+          <Text style={styles.lastUpdated}>
+            Last updated at {lastUpdatedAt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+          </Text>
+        ) : null}
         {/* Submit Form */}
         <Card style={styles.formCard}>
           <InputField
@@ -208,6 +255,11 @@ export default function ComplaintScreen() {
 const styles = StyleSheet.create({
   flex: { flex: 1, backgroundColor: colors.neutral.surface },
   content: { padding: spacing.screenPadding },
+  lastUpdated: {
+    fontSize: typography.sizes.sm,
+    color: colors.neutral.textMuted,
+    marginBottom: spacing.sm,
+  },
   formCard: { marginBottom: spacing.sectionGap },
   sectionTitle: {
     fontSize: typography.sizes.xl,

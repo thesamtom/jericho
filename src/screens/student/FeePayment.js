@@ -1,5 +1,15 @@
 import React, { useEffect, useState } from 'react';
-import { View, Text, ScrollView, TouchableOpacity, StyleSheet, Alert } from 'react-native';
+import {
+  View,
+  Text,
+  ScrollView,
+  TouchableOpacity,
+  StyleSheet,
+  Alert,
+  RefreshControl,
+  Platform,
+  ToastAndroid,
+} from 'react-native';
 import { ScreenHeader, Card, StatusBadge, PrimaryButton } from '../../components';
 import { useAuth } from '../../context/AuthContext';
 import { supabase } from '../../lib/supabase';
@@ -12,12 +22,24 @@ export default function FeePayment() {
   const [fees, setFees] = useState([]);
   const [selectedMethod, setSelectedMethod] = useState('UPI');
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [lastUpdatedAt, setLastUpdatedAt] = useState(null);
+  const [lastRefreshMs, setLastRefreshMs] = useState(0);
 
   useEffect(() => {
     loadFees();
   }, []);
 
-  async function loadFees() {
+  function showRefreshError() {
+    const message = 'Failed to refresh. Try again.';
+    if (Platform.OS === 'android') {
+      ToastAndroid.show(message, ToastAndroid.SHORT);
+      return;
+    }
+    Alert.alert('Refresh Failed', message);
+  }
+
+  async function loadFees({ isRefresh = false, showError = false } = {}) {
     try {
       const { data, error } = await supabase
         .from('fee')
@@ -26,11 +48,25 @@ export default function FeePayment() {
         .order('due_date', { ascending: false });
       if (error) throw error;
       setFees(data || []);
+      setLastUpdatedAt(new Date());
     } catch {
-      setFees([]);
+      if (showError) showRefreshError();
+      if (!isRefresh) setFees([]);
     } finally {
-      setLoading(false);
+      if (!isRefresh) setLoading(false);
     }
+  }
+
+  async function handleRefresh() {
+    if (refreshing) return;
+
+    const now = Date.now();
+    if (now - lastRefreshMs < 1200) return;
+
+    setRefreshing(true);
+    await loadFees({ isRefresh: true, showError: true });
+    setRefreshing(false);
+    setLastRefreshMs(Date.now());
   }
 
   async function handlePay(feeId) {
@@ -58,7 +94,17 @@ export default function FeePayment() {
   return (
     <View style={styles.flex}>
       <ScreenHeader title="Fee Payment" subtitle="View and pay fees" />
-      <ScrollView contentContainerStyle={styles.content}>
+      <ScrollView
+        contentContainerStyle={styles.content}
+        refreshControl={
+          <RefreshControl refreshing={refreshing} onRefresh={handleRefresh} enabled={!refreshing} />
+        }
+      >
+        {lastUpdatedAt ? (
+          <Text style={styles.lastUpdated}>
+            Last updated at {lastUpdatedAt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+          </Text>
+        ) : null}
         {/* Payment Method */}
         <Text style={styles.sectionTitle}>Payment Method</Text>
         <View style={styles.methodRow}>
@@ -107,6 +153,11 @@ export default function FeePayment() {
 const styles = StyleSheet.create({
   flex: { flex: 1, backgroundColor: colors.neutral.surface },
   content: { padding: spacing.screenPadding },
+  lastUpdated: {
+    fontSize: typography.sizes.sm,
+    color: colors.neutral.textMuted,
+    marginBottom: spacing.sm,
+  },
   sectionTitle: {
     fontSize: typography.sizes.xl,
     fontWeight: typography.weights.semibold,

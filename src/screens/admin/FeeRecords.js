@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { View, Text, FlatList, StyleSheet } from 'react-native';
+import { View, Text, FlatList, StyleSheet, Alert, Platform, ToastAndroid } from 'react-native';
 import { ScreenHeader, Card, StatusBadge } from '../../components';
 import { supabase } from '../../lib/supabase';
 import { colors, spacing, typography } from '../../theme';
@@ -7,12 +7,23 @@ import { colors, spacing, typography } from '../../theme';
 export default function FeeRecords() {
   const [fees, setFees] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [lastRefreshMs, setLastRefreshMs] = useState(0);
+
+  function showRefreshError() {
+    const message = 'Failed to refresh. Try again.';
+    if (Platform.OS === 'android') {
+      ToastAndroid.show(message, ToastAndroid.SHORT);
+      return;
+    }
+    Alert.alert('Refresh Failed', message);
+  }
 
   useEffect(() => {
     loadFees();
   }, []);
 
-  async function loadFees() {
+  async function loadFees({ isRefresh = false, showError = false } = {}) {
     try {
       const { data, error } = await supabase
         .from('fee')
@@ -21,10 +32,21 @@ export default function FeeRecords() {
       if (error) throw error;
       setFees(data || []);
     } catch {
-      setFees([]);
+      if (showError) showRefreshError();
+      if (!isRefresh) setFees([]);
     } finally {
-      setLoading(false);
+      if (!isRefresh) setLoading(false);
     }
+  }
+
+  async function handleRefresh() {
+    if (refreshing) return;
+    const now = Date.now();
+    if (now - lastRefreshMs < 1200) return;
+    setRefreshing(true);
+    await loadFees({ isRefresh: true, showError: true });
+    setRefreshing(false);
+    setLastRefreshMs(Date.now());
   }
 
   function renderFee({ item }) {
@@ -47,6 +69,8 @@ export default function FeeRecords() {
         data={fees}
         keyExtractor={(item) => String(item.id)}
         renderItem={renderFee}
+        refreshing={refreshing}
+        onRefresh={handleRefresh}
         contentContainerStyle={styles.list}
         ListEmptyComponent={
           <Text style={styles.empty}>

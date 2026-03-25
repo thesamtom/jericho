@@ -1,5 +1,15 @@
 import React, { useState } from 'react';
-import { View, Text, ScrollView, TouchableOpacity, StyleSheet, Alert } from 'react-native';
+import {
+  View,
+  Text,
+  ScrollView,
+  TouchableOpacity,
+  StyleSheet,
+  Alert,
+  RefreshControl,
+  Platform,
+  ToastAndroid,
+} from 'react-native';
 import { ScreenHeader, Card, PrimaryButton } from '../../components';
 import { supabase } from '../../lib/supabase';
 import { colors, spacing, typography, borderRadius } from '../../theme';
@@ -67,6 +77,9 @@ export default function WardenComplaintDetailScreen({ route, navigation }) {
   const [complaint, setComplaint] = useState(initialComplaint);
   const [selectedStatus, setSelectedStatus] = useState(normalizeStatus(initialComplaint.status));
   const [saving, setSaving] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
+  const [lastUpdatedAt, setLastUpdatedAt] = useState(null);
+  const [lastRefreshMs, setLastRefreshMs] = useState(0);
 
   async function updateByIdentifier(payload) {
     const identifiers = [
@@ -117,11 +130,71 @@ export default function WardenComplaintDetailScreen({ route, navigation }) {
   const studentName = student?.name || `Student ${complaint?.student_id || ''}`;
   const roomValue = student?.room_no || student?.room_id || complaint?.room_no || complaint?.room_id || '—';
 
+  function showRefreshError() {
+    const message = 'Failed to refresh. Try again.';
+    if (Platform.OS === 'android') {
+      ToastAndroid.show(message, ToastAndroid.SHORT);
+      return;
+    }
+    Alert.alert('Refresh Failed', message);
+  }
+
+  async function handleRefresh() {
+    if (refreshing) return;
+    const now = Date.now();
+    if (now - lastRefreshMs < 1200) return;
+
+    const identifiers = [
+      { column: 'complaint_id', value: complaint?.complaint_id },
+      { column: 'id', value: complaint?.id },
+    ].filter((entry) => entry.value !== undefined && entry.value !== null);
+
+    if (identifiers.length === 0) return;
+
+    setRefreshing(true);
+    try {
+      let data = null;
+      for (let i = 0; i < identifiers.length; i += 1) {
+        const entry = identifiers[i];
+        const result = await supabase
+          .from('complaint')
+          .select('*')
+          .eq(entry.column, entry.value)
+          .maybeSingle();
+        if (!result.error && result.data) {
+          data = result.data;
+          break;
+        }
+      }
+
+      if (!data) throw new Error('Unable to fetch latest complaint data');
+
+      setComplaint(data);
+      setSelectedStatus(normalizeStatus(data.status));
+      setLastUpdatedAt(new Date());
+    } catch {
+      showRefreshError();
+    } finally {
+      setRefreshing(false);
+      setLastRefreshMs(Date.now());
+    }
+  }
+
   return (
     <View style={styles.flex}>
       <ScreenHeader title="Complaint Detail" subtitle="Review and update complaint" />
 
-      <ScrollView contentContainerStyle={styles.content}>
+      <ScrollView
+        contentContainerStyle={styles.content}
+        refreshControl={
+          <RefreshControl refreshing={refreshing} onRefresh={handleRefresh} enabled={!refreshing} />
+        }
+      >
+        {lastUpdatedAt ? (
+          <Text style={styles.lastUpdated}>
+            Last updated at {lastUpdatedAt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+          </Text>
+        ) : null}
         <Card>
           <Text style={styles.title}>{complaintTitle(complaint)}</Text>
           <Text style={styles.info}>Student Name: {studentName}</Text>
@@ -168,6 +241,11 @@ export default function WardenComplaintDetailScreen({ route, navigation }) {
 const styles = StyleSheet.create({
   flex: { flex: 1, backgroundColor: colors.neutral.surface },
   content: { padding: spacing.screenPadding, paddingBottom: spacing.xl },
+  lastUpdated: {
+    fontSize: typography.sizes.sm,
+    color: colors.neutral.textMuted,
+    marginBottom: spacing.sm,
+  },
   title: {
     fontSize: typography.sizes['2xl'],
     fontWeight: typography.weights.bold,
