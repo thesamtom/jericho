@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { View, Text, FlatList, TouchableOpacity, StyleSheet, Alert, Platform, ToastAndroid } from 'react-native';
 import { Feather } from '@expo/vector-icons';
+import { useFocusEffect } from '@react-navigation/native';
 import { ScreenHeader } from '../../components';
 import { supabase } from '../../lib/supabase';
 import { colors, spacing, typography, borderRadius, shadows } from '../../theme';
@@ -25,6 +26,12 @@ export default function HostelStudents({ route, navigation }) {
   useEffect(() => {
     loadStudents();
   }, []);
+
+  useFocusEffect(
+    React.useCallback(() => {
+      loadStudents({ isRefresh: true });
+    }, [hostelId])
+  );
 
   async function loadStudents({ isRefresh = false, showError = false } = {}) {
     try {
