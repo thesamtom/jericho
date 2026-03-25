@@ -2,7 +2,7 @@ import React from 'react';
 import { TouchableOpacity, Text, StyleSheet, ActivityIndicator } from 'react-native';
 import { colors, borderRadius, typography } from '../theme';
 
-export default function PrimaryButton({ title, onPress, loading, style }) {
+export default function PrimaryButton({ title, onPress, loading, style, textStyle }) {
   return (
     <TouchableOpacity
       style={[styles.button, style]}
@@ -13,7 +13,7 @@ export default function PrimaryButton({ title, onPress, loading, style }) {
       {loading ? (
         <ActivityIndicator color="#FFF" />
       ) : (
-        <Text style={styles.text}>{title}</Text>
+        <Text style={[styles.text, textStyle]}>{title}</Text>
       )}
     </TouchableOpacity>
   );

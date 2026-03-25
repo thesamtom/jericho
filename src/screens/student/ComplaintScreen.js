@@ -1,9 +1,16 @@
 import React, { useEffect, useState } from 'react';
-import { View, Text, ScrollView, StyleSheet, Alert } from 'react-native';
+import { View, Text, ScrollView, StyleSheet, Alert, TouchableOpacity } from 'react-native';
 import { ScreenHeader, InputField, PrimaryButton, Card, StatusBadge } from '../../components';
 import { useAuth } from '../../context/AuthContext';
 import { supabase } from '../../lib/supabase';
 import { colors, spacing, typography } from '../../theme';
+
+const FILTER_OPTIONS = [
+  { key: 'all', label: 'All' },
+  { key: 'pending', label: 'Pending' },
+  { key: 'in_progress', label: 'In Progress' },
+  { key: 'resolved', label: 'Resolved' },
+];
 
 export default function ComplaintScreen() {
   const { user } = useAuth();
@@ -11,6 +18,7 @@ export default function ComplaintScreen() {
   const [complaint, setComplaint] = useState('');
   const [complaints, setComplaints] = useState([]);
   const [loading, setLoading] = useState(false);
+  const [selectedFilter, setSelectedFilter] = useState('all');
 
   useEffect(() => {
     loadComplaints();
@@ -149,10 +157,36 @@ export default function ComplaintScreen() {
 
         {/* History */}
         <Text style={styles.sectionTitle}>Complaint History</Text>
+        
+        {/* Filter Buttons - Minimal Design */}
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.filterScroll} contentContainerStyle={styles.filterContainer}>
+          {FILTER_OPTIONS.map((filter) => (
+            <TouchableOpacity
+              key={filter.key}
+              style={[
+                styles.filterChip,
+                selectedFilter === filter.key && styles.filterChipActive,
+              ]}
+              onPress={() => setSelectedFilter(filter.key)}
+            >
+              <Text
+                style={[
+                  styles.filterChipText,
+                  selectedFilter === filter.key && styles.filterChipTextActive,
+                ]}
+              >
+                {filter.label}
+              </Text>
+            </TouchableOpacity>
+          ))}
+        </ScrollView>
+        
         {complaints.length === 0 ? (
           <Text style={styles.empty}>No complaints yet</Text>
         ) : (
-          complaints.map((item) => (
+          complaints
+            .filter((item) => selectedFilter === 'all' || item.status === selectedFilter)
+            .map((item) => (
             <Card key={String(item.complaint_id || item.id || `${item.student_id}-${item.created_at}`)} style={styles.historyCard}>
               <View style={styles.historyRow}>
                 <Text style={styles.historyText} numberOfLines={2}>
@@ -180,6 +214,33 @@ const styles = StyleSheet.create({
     fontWeight: typography.weights.semibold,
     color: colors.neutral.textPrimary,
     marginBottom: spacing.md,
+  },
+  filterScroll: {
+    marginBottom: spacing.md,
+  },
+  filterContainer: {
+    flexDirection: 'row',
+    gap: spacing.sm,
+  },
+  filterChip: {
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: 20,
+    backgroundColor: colors.neutral.border,
+    borderWidth: 1,
+    borderColor: colors.neutral.border,
+  },
+  filterChipActive: {
+    backgroundColor: colors.primary.main,
+    borderColor: colors.primary.main,
+  },
+  filterChipText: {
+    fontSize: typography.sizes.sm,
+    fontWeight: typography.weights.medium,
+    color: colors.neutral.textPrimary,
+  },
+  filterChipTextActive: {
+    color: '#FFFFFF',
   },
   historyCard: { marginBottom: spacing.sm },
   historyRow: {

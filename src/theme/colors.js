@@ -9,11 +9,15 @@ export const colors = {
     approved: '#16A34A',
     pending: '#F59E0B',
     rejected: '#DC2626',
+    resolved: '#16A34A',
+    in_progress: '#06B6D4',
   },
   statusBg: {
     approved: '#DCFCE7',
     pending: '#FEF3C7',
     rejected: '#FEE2E2',
+    resolved: '#DCFCE7',
+    in_progress: '#CFFAFE',
   },
   neutral: {
     background: '#FFFFFF',
