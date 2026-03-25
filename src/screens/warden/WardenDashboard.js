@@ -12,15 +12,12 @@ import {
 } from 'react-native';
 import { Feather } from '@expo/vector-icons';
 import { ScreenHeader, Card, StatusBadge } from '../../components';
-import { useAuth } from '../../context/AuthContext';
 import { supabase } from '../../lib/supabase';
-import { colors, spacing, typography, borderRadius, shadows } from '../../theme';
+import { colors, spacing, typography, borderRadius } from '../../theme';
 
 export default function WardenDashboard({ navigation }) {
-  const { user } = useAuth();
   const [pendingRequests, setPendingRequests] = useState([]);
   const [complaints, setComplaints] = useState([]);
-  const [students, setStudents] = useState([]);
   const [refreshing, setRefreshing] = useState(false);
   const [lastUpdatedAt, setLastUpdatedAt] = useState(null);
   const [lastRefreshMs, setLastRefreshMs] = useState(0);
@@ -56,13 +53,6 @@ export default function WardenDashboard({ navigation }) {
         .in('status', ['pending', 'in_progress'])
         .order('created_at', { ascending: false });
       if (complaintData) setComplaints(complaintData);
-
-      // Students in hostel for status update
-      const { data: studentData } = await supabase
-        .from('hostel_status')
-        .select('*')
-        .limit(20);
-      if (studentData) setStudents(studentData);
       setLastUpdatedAt(new Date());
       return true;
     } catch {
@@ -83,6 +73,25 @@ export default function WardenDashboard({ navigation }) {
     setLastRefreshMs(Date.now());
   }
 
+  function toDateTime(dateValue, timeValue, isEndOfRange) {
+    if (!dateValue) return null;
+    const fallbackTime = isEndOfRange ? '23:59' : '00:00';
+    const time = String(timeValue || fallbackTime);
+    const composed = `${String(dateValue)}T${time}:00`;
+    const parsed = new Date(composed);
+    return Number.isNaN(parsed.getTime()) ? null : parsed;
+  }
+
+  function deriveStudentStatusFromRequestWindow(requestRow) {
+    const now = new Date();
+    const leaveAt = toDateTime(requestRow?.leave_date, requestRow?.leave_time, false);
+    const returnAt = toDateTime(requestRow?.return_date, requestRow?.return_time, true);
+
+    if (!leaveAt || !returnAt) return 'present';
+    if (now >= leaveAt && now <= returnAt) return 'absent';
+    return 'present';
+  }
+
   async function handleRequestAction(requestId, action) {
     try {
       const updates = { warden_status: action };
@@ -99,20 +108,25 @@ export default function WardenDashboard({ navigation }) {
         .update(updates)
         .eq('request_id', requestId);
       if (error) throw error;
-      Alert.alert('Success', `Request ${action}`);
-      loadData();
-    } catch (err) {
-      Alert.alert('Error', err.message);
-    }
-  }
 
-  async function handleStatusUpdate(studentId, status) {
-    try {
-      const { error } = await supabase
-        .from('hostel_status')
-        .upsert({ student_id: studentId, status }, { onConflict: 'student_id' });
-      if (error) throw error;
-      Alert.alert('Updated', `Student marked as ${status}`);
+      if (req?.student_id && updates.final_status === 'Approved') {
+        const nextStatus = deriveStudentStatusFromRequestWindow(req);
+        const studentUpdate = await supabase
+          .from('student')
+          .update({ status: nextStatus })
+          .eq('student_id', req.student_id);
+        if (studentUpdate.error) throw studentUpdate.error;
+      }
+
+      if (req?.student_id && action === 'Rejected') {
+        const studentUpdate = await supabase
+          .from('student')
+          .update({ status: 'present' })
+          .eq('student_id', req.student_id);
+        if (studentUpdate.error) throw studentUpdate.error;
+      }
+
+      Alert.alert('Success', `Request ${action}`);
       loadData();
     } catch (err) {
       Alert.alert('Error', err.message);
@@ -184,35 +198,6 @@ export default function WardenDashboard({ navigation }) {
               <Text style={styles.cardMeta}>
                 {new Date(item.created_at).toLocaleDateString()}
               </Text>
-            </Card>
-          ))
-        )}
-
-        {/* Hostel Status Update */}
-        <Text style={styles.sectionTitle}>Hostel Presence</Text>
-        {students.length === 0 ? (
-          <Text style={styles.empty}>No student records</Text>
-        ) : (
-          students.map((s) => (
-            <Card key={s.student_id} style={styles.card}>
-              <View style={styles.cardHeader}>
-                <Text style={styles.cardTitle}>Student: {s.student_id}</Text>
-                <StatusBadge status={s.status === 'present' ? 'approved' : 'rejected'} />
-              </View>
-              <View style={styles.actionRow}>
-                <TouchableOpacity
-                  style={[styles.actionBtn, styles.approveBtn]}
-                  onPress={() => handleStatusUpdate(s.student_id, 'present')}
-                >
-                  <Text style={styles.actionText}>Mark Present</Text>
-                </TouchableOpacity>
-                <TouchableOpacity
-                  style={[styles.actionBtn, styles.rejectBtn]}
-                  onPress={() => handleStatusUpdate(s.student_id, 'out')}
-                >
-                  <Text style={styles.actionText}>Mark Out</Text>
-                </TouchableOpacity>
-              </View>
             </Card>
           ))
         )}

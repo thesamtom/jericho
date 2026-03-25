@@ -40,22 +40,27 @@ export default function StudentDashboard({ navigation }) {
   async function loadData({ showError = false } = {}) {
     try {
       const studentId = user?.student_id || user?.id;
-      const today = new Date().toISOString().split('T')[0];
-
-      // Check if student has an approved movement request where they're currently away
-      const { data: activeRequests } = await supabase
-        .from('movement_request')
-        .select('*')
+      let { data: studentRow, error: studentError } = await supabase
+        .from('student')
+        .select('status')
         .eq('student_id', studentId)
-        .eq('final_status', 'Approved')
-        .lte('leave_date', today)
-        .gte('return_date', today);
+        .maybeSingle();
 
-      if (activeRequests && activeRequests.length > 0) {
-        setHostelStatus('Not Present');
-      } else {
-        setHostelStatus('Present');
+      if (studentError) {
+        const retry = await supabase
+          .from('student')
+          .select('status')
+          .eq('id', studentId)
+          .maybeSingle();
+        studentRow = retry.data;
+        studentError = retry.error;
       }
+
+      if (studentError) throw studentError;
+
+      const dbStatus = String(studentRow?.status || 'present').toLowerCase();
+      console.log('Student Status from DB:', studentRow?.status);
+      setHostelStatus(dbStatus === 'absent' ? 'Not Present' : 'Present');
 
       // Load recent movement requests
       const { data: requests } = await supabase

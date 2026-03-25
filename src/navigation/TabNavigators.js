@@ -22,6 +22,7 @@ import ParentDashboard from '../screens/parent/ParentDashboard';
 import WardenDashboard from '../screens/warden/WardenDashboard';
 import WardenComplaintsScreen from '../screens/warden/WardenComplaintsScreen';
 import WardenComplaintDetailScreen from '../screens/warden/WardenComplaintDetailScreen';
+import WardenStudentsScreen from '../screens/warden/WardenStudentsScreen';
 
 // Shared
 import ProfileScreen from '../screens/ProfileScreen';
@@ -158,6 +159,14 @@ function WardenComplaints() {
   );
 }
 
+function WardenStudents() {
+  return (
+    <Stack.Navigator screenOptions={screenOptions}>
+      <Stack.Screen name="WardenStudentsList" component={WardenStudentsScreen} />
+    </Stack.Navigator>
+  );
+}
+
 export function WardenTabs() {
   return (
     <Tab.Navigator screenOptions={tabBarOptions}>
@@ -170,6 +179,11 @@ export function WardenTabs() {
         name="Complaints"
         component={WardenComplaints}
         options={{ tabBarIcon: ({ color, size }) => <Feather name="alert-triangle" size={size} color={color} /> }}
+      />
+      <Tab.Screen
+        name="Students"
+        component={WardenStudents}
+        options={{ tabBarIcon: ({ color, size }) => <Feather name="users" size={size} color={color} /> }}
       />
       <Tab.Screen
         name="Profile"
