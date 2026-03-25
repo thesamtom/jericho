@@ -12,12 +12,21 @@ import {
 import { ScreenHeader, Card } from '../../components';
 import { useAuth } from '../../context/AuthContext';
 import { supabase } from '../../lib/supabase';
-import { formatTimeDisplay } from '../../lib/dateTime';
+import { formatTimeDisplay, formatDateDisplay } from '../../lib/dateTime';
 import { colors, spacing, typography, borderRadius } from '../../theme';
 
 function normalizePresenceStatus(status) {
   const key = String(status || '').toLowerCase();
   return key === 'present' ? 'present' : 'absent';
+}
+
+function toDateTime(dateValue, timeValue) {
+  if (!dateValue) return null;
+  const date = String(dateValue).trim();
+  const time = String(timeValue || '23:59:59').trim();
+  const normalizedTime = time.length === 5 ? `${time}:00` : time;
+  const parsed = new Date(`${date}T${normalizedTime}`);
+  return Number.isNaN(parsed.getTime()) ? null : parsed;
 }
 
 export default function WardenStudentsScreen() {
@@ -71,6 +80,9 @@ export default function WardenStudentsScreen() {
     if (!isRefresh) setLoading(true);
 
     try {
+      // Let DB compute time-based absence before reading student states.
+      await supabase.rpc('auto_mark_absent');
+
       const resolvedHostelId = await resolveWardenHostelId();
       setHostelId(resolvedHostelId);
 
@@ -88,14 +100,49 @@ export default function WardenStudentsScreen() {
       if (studentError) throw studentError;
 
       const rows = studentRows || [];
+      const studentIds = rows.map((row) => row.student_id).filter(Boolean);
+
+      let latestApprovedByStudent = {};
+
+      if (studentIds.length > 0) {
+        const { data: requestRows, error: requestError } = await supabase
+          .from('movement_request')
+          .select('*')
+          .in('student_id', studentIds)
+          .order('created_at', { ascending: false });
+
+        if (requestError) throw requestError;
+
+        (requestRows || []).forEach((row) => {
+          const status = String(row.final_status || '').toLowerCase();
+          const key = String(row.student_id || '');
+          if (!key || status !== 'approved' || latestApprovedByStudent[key]) return;
+          latestApprovedByStudent[key] = row;
+        });
+      }
+
+      const now = new Date();
 
       const merged = rows.map((row) => {
         const id = String(row.student_id || row.id || '');
-        console.log('Student Status from DB:', row.status);
+        const latestRequest = latestApprovedByStudent[id] || null;
+        const leaveAt = latestRequest
+          ? toDateTime(latestRequest.leave_date, latestRequest.leave_time)
+          : null;
+        const returnAt = latestRequest
+          ? toDateTime(latestRequest.return_date, latestRequest.return_time)
+          : null;
+
+        const currentStatus = normalizePresenceStatus(row.status);
+
         return {
           id,
           name: row.name || `Student ${id}`,
-          status: normalizePresenceStatus(row.status),
+          status: currentStatus,
+          latestLeaveReason: latestRequest?.reason || null,
+          latestLeaveTime: latestRequest?.leave_time || null,
+          latestLeaveDate: latestRequest?.leave_date || null,
+          activeRequestId: latestRequest?.request_id || null,
         };
       });
 
@@ -121,34 +168,22 @@ export default function WardenStudentsScreen() {
     setLastRefreshMs(Date.now());
   }
 
-  async function handleToggleStatus(student) {
+  async function handleCheckIn(student) {
     if (!student?.id || updatingById[student.id]) return;
 
-    const previousStatus = student.status;
-    const nextState = previousStatus === 'present' ? 'absent' : 'present';
-
     setUpdatingById((prev) => ({ ...prev, [student.id]: true }));
-    setStudents((prev) => prev.map((item) => (item.id === student.id ? { ...item, status: nextState } : item)));
+    setStudents((prev) => prev.map((item) => (item.id === student.id ? { ...item, status: 'present' } : item)));
 
     try {
-      let { error } = await supabase
-        .from('student')
-        .update({ status: nextState })
-        .eq('student_id', student.id);
-
-      if (error) {
-        const retry = await supabase
-          .from('student')
-          .update({ status: nextState })
-          .eq('id', student.id);
-        error = retry.error;
-      }
+      const { error } = await supabase.rpc('warden_check_in', {
+        p_student_id: Number(student.id),
+      });
 
       if (error) throw error;
+
+      await loadStudents({ isRefresh: true });
     } catch {
-      setStudents((prev) =>
-        prev.map((item) => (item.id === student.id ? { ...item, status: previousStatus } : item))
-      );
+      setStudents((prev) => prev.map((item) => (item.id === student.id ? { ...item, status: 'absent' } : item)));
       showRefreshError();
     } finally {
       setUpdatingById((prev) => ({ ...prev, [student.id]: false }));
@@ -170,26 +205,28 @@ export default function WardenStudentsScreen() {
           <View style={styles.studentInfo}>
             <Text style={styles.studentName} numberOfLines={1}>{item.name}</Text>
             <Text style={styles.studentId}>ID: {item.id}</Text>
+            {!isPresentTab && item.latestLeaveDate ? (
+              <Text style={styles.studentMeta}>Leave: {formatDateDisplay(item.latestLeaveDate)} {item.latestLeaveTime ? `at ${formatTimeDisplay(item.latestLeaveTime)}` : ''}</Text>
+            ) : null}
+            {!isPresentTab && item.latestLeaveReason ? (
+              <Text style={styles.studentMeta}>Reason: {item.latestLeaveReason}</Text>
+            ) : null}
           </View>
 
-          <TouchableOpacity
-            style={[
-              styles.actionButton,
-              isPresentTab ? styles.actionAbsent : styles.actionPresent,
-              isUpdating && styles.actionDisabled,
-            ]}
-            onPress={() => handleToggleStatus(item)}
-            disabled={isUpdating}
-            activeOpacity={0.8}
-          >
-            <Text style={styles.actionText}>
-              {isUpdating
-                ? 'Updating...'
-                : isPresentTab
-                  ? 'Mark Absent'
-                  : 'Mark Present'}
-            </Text>
-          </TouchableOpacity>
+          {!isPresentTab ? (
+            <TouchableOpacity
+              style={[
+                styles.actionButton,
+                styles.actionPresent,
+                isUpdating && styles.actionDisabled,
+              ]}
+              onPress={() => handleCheckIn(item)}
+              disabled={isUpdating}
+              activeOpacity={0.8}
+            >
+              <Text style={styles.actionText}>{isUpdating ? 'Checking in...' : 'Check In'}</Text>
+            </TouchableOpacity>
+          ) : null}
         </View>
       </Card>
     );
@@ -313,6 +350,11 @@ const styles = StyleSheet.create({
     fontSize: typography.sizes.sm,
     color: colors.neutral.textMuted,
   },
+  studentMeta: {
+    marginTop: 2,
+    fontSize: typography.sizes.sm,
+    color: colors.neutral.textSecondary,
+  },
   actionButton: {
     minWidth: 122,
     borderRadius: borderRadius.sm,
@@ -320,9 +362,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
     alignItems: 'center',
     justifyContent: 'center',
-  },
-  actionAbsent: {
-    backgroundColor: colors.status.rejected,
   },
   actionPresent: {
     backgroundColor: colors.status.approved,

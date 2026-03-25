@@ -14,8 +14,17 @@ import { Feather } from '@expo/vector-icons';
 import { ScreenHeader, Card, StatusBadge } from '../../components';
 import { useAuth } from '../../context/AuthContext';
 import { supabase } from '../../lib/supabase';
-import { formatDateRangeDisplay, formatTimeDisplay } from '../../lib/dateTime';
+import { formatDateRangeDisplay, formatTimeDisplay, formatTimeString } from '../../lib/dateTime';
 import { colors, spacing, typography, borderRadius, shadows } from '../../theme';
+
+function toDateTime(dateValue, timeValue) {
+  if (!dateValue) return null;
+  const date = String(dateValue).trim();
+  const time = String(timeValue || '00:00:00').trim();
+  const normalizedTime = time.length === 5 ? `${time}:00` : time;
+  const parsed = new Date(`${date}T${normalizedTime}`);
+  return Number.isNaN(parsed.getTime()) ? null : parsed;
+}
 
 export default function StudentDashboard({ navigation }) {
   const { user } = useAuth();
@@ -41,6 +50,10 @@ export default function StudentDashboard({ navigation }) {
   async function loadData({ showError = false } = {}) {
     try {
       const studentId = user?.student_id || user?.id;
+
+      // Keep DB as source of truth for time-based absence.
+      await supabase.rpc('auto_mark_absent');
+
       let { data: studentRow, error: studentError } = await supabase
         .from('student')
         .select('status')
@@ -59,10 +72,6 @@ export default function StudentDashboard({ navigation }) {
 
       if (studentError) throw studentError;
 
-      const dbStatus = String(studentRow?.status || 'present').toLowerCase();
-      console.log('Student Status from DB:', studentRow?.status);
-      setHostelStatus(dbStatus === 'absent' ? 'Not Present' : 'Present');
-
       // Load recent movement requests
       const { data: requests } = await supabase
         .from('movement_request')
@@ -70,6 +79,28 @@ export default function StudentDashboard({ navigation }) {
         .eq('student_id', studentId)
         .order('created_at', { ascending: false })
         .limit(5);
+
+      const now = new Date();
+      const activeApprovedLeave = (requests || []).some((req) => {
+        const finalStatus = String(req?.final_status || '').toLowerCase();
+        const checkedInAt = req?.checked_in_at;
+        const leaveAt = toDateTime(req?.leave_date, req?.leave_time);
+
+        if (finalStatus !== 'approved' || checkedInAt || !leaveAt) return false;
+        return now >= leaveAt;
+      });
+
+      const dbStatus = String(studentRow?.status || 'present').toLowerCase();
+      const effectiveAbsent = dbStatus === 'absent' || activeApprovedLeave;
+
+      if (activeApprovedLeave && dbStatus !== 'absent') {
+        await supabase
+          .from('student')
+          .update({ status: 'absent' })
+          .eq('student_id', studentId);
+      }
+
+      setHostelStatus(effectiveAbsent ? 'Not Present' : 'Present');
       if (requests) setRecentRequests(requests);
       setLastUpdatedAt(new Date());
       return true;
@@ -170,7 +201,10 @@ export default function StudentDashboard({ navigation }) {
                 <StatusBadge status={badge.status} label={badge.label} />
               </View>
               <Text style={styles.requestDate}>
-                {formatDateRangeDisplay(req.leave_date, req.return_date)}
+                {formatDateRangeDisplay(req.leave_date, req.return_date, req.leave_time, req.return_time)}
+              </Text>
+              <Text style={styles.requestTime}>
+                Leave: {formatTimeString(req.leave_time)}   Return: {formatTimeString(req.return_time)}
               </Text>
             </Card>
           )})
@@ -261,6 +295,11 @@ const styles = StyleSheet.create({
   requestDate: {
     fontSize: typography.sizes.sm,
     color: colors.neutral.textMuted,
+  },
+  requestTime: {
+    fontSize: typography.sizes.sm,
+    color: colors.neutral.textSecondary,
+    marginTop: 2,
   },
   empty: {
     textAlign: 'center',

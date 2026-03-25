@@ -47,6 +47,9 @@ export default function ParentDashboard() {
 
   async function loadData({ isRefresh = false, showError = false } = {}) {
     try {
+      // Keep parent view synced with DB time-based absence updates.
+      await supabase.rpc('auto_mark_absent');
+
       const parentId = user?.parent_id || user?.id;
 
       // Load linked student info
