@@ -36,6 +36,8 @@ export default function AdminStudentDetail({ route, navigation }) {
   const [editVisible, setEditVisible] = useState(false);
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [feeVisible, setFeeVisible] = useState(false);
+  const [feeSaving, setFeeSaving] = useState(false);
 
   const [editName, setEditName] = useState('');
   const [editRoomNo, setEditRoomNo] = useState('');
@@ -43,6 +45,8 @@ export default function AdminStudentDetail({ route, navigation }) {
   const [editParentName, setEditParentName] = useState('');
   const [editParentPhone, setEditParentPhone] = useState('');
   const [editParentEmail, setEditParentEmail] = useState('');
+  const [feeAmount, setFeeAmount] = useState('');
+  const [feeNote, setFeeNote] = useState('');
 
   useEffect(() => {
     loadData();
@@ -170,6 +174,13 @@ export default function AdminStudentDetail({ route, navigation }) {
     setEditVisible(true);
   }
 
+  function openFeeModal() {
+    if (!isAdmin || !student || saving || deleting || feeSaving) return;
+    setFeeAmount('');
+    setFeeNote('');
+    setFeeVisible(true);
+  }
+
   async function handleSaveEdit() {
     if (!isAdmin || saving || deleting || !student) return;
 
@@ -237,6 +248,48 @@ export default function AdminStudentDetail({ route, navigation }) {
       Alert.alert('Update Failed', error.message || 'Unable to update student details.');
     } finally {
       setSaving(false);
+    }
+  }
+
+  async function handleSaveFee() {
+    if (!isAdmin || !student || feeSaving || saving || deleting) return;
+
+    const trimmedAmount = feeAmount.trim();
+    const trimmedNote = feeNote.trim();
+
+    if (!trimmedAmount) {
+      Alert.alert('Validation', 'Fee amount is required.');
+      return;
+    }
+
+    const parsedAmount = Number(trimmedAmount);
+    if (Number.isNaN(parsedAmount) || parsedAmount <= 0) {
+      Alert.alert('Validation', 'Fee amount must be a valid number greater than 0.');
+      return;
+    }
+
+    setFeeSaving(true);
+    try {
+      const { data, error } = await supabase.rpc('admin_assign_student_fee', {
+        p_student_id: Number(student.student_id),
+        p_amount: parsedAmount,
+        p_note: trimmedNote || null,
+      });
+
+      if (error) throw error;
+
+      if (data && data.error) {
+        throw new Error(data.error);
+      }
+
+      await loadData({ isRefresh: true });
+      setFeeVisible(false);
+      showSuccess('Fee updated successfully');
+    } catch (error) {
+      const message = error.message || 'Unable to update fee.';
+      Alert.alert('Fee Update Failed', `${message}\n\nCreate the SQL RPC admin_assign_student_fee in Supabase if it does not exist.`);
+    } finally {
+      setFeeSaving(false);
     }
   }
 
@@ -359,12 +412,25 @@ export default function AdminStudentDetail({ route, navigation }) {
         </Card>
 
         <Card style={styles.sectionCard}>
-          <Text style={styles.sectionTitle}>Fee Info</Text>
+          <View style={styles.cardTitleRow}>
+            <Text style={styles.sectionTitle}>Fee Info</Text>
+            {isAdmin ? (
+              <TouchableOpacity
+                style={styles.feeEditBtn}
+                onPress={openFeeModal}
+                disabled={loading || saving || deleting || feeSaving || !student}
+                activeOpacity={0.8}
+              >
+                <Feather name="edit-2" size={16} color="#FFFFFF" />
+              </TouchableOpacity>
+            ) : null}
+          </View>
           <View style={styles.feeRow}>
             <Text style={styles.pendingLabel}>Total Pending Fees</Text>
             <StatusBadge status={feeStatus} />
           </View>
           <Text style={styles.pendingValue}>INR {pendingTotal}</Text>
+          <Text style={styles.feeHint}>Due date is auto-set by system (+21 days) on fee update.</Text>
         </Card>
 
         <Card style={styles.sectionCard}>
@@ -474,6 +540,68 @@ export default function AdminStudentDetail({ route, navigation }) {
           </View>
         </View>
       </Modal>
+
+      <Modal
+        visible={feeVisible}
+        animationType="slide"
+        transparent
+        onRequestClose={() => {
+          if (!feeSaving) setFeeVisible(false);
+        }}
+      >
+        <View style={styles.modalBackdrop}>
+          <View style={styles.modalCard}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>Assign Fee</Text>
+              <TouchableOpacity
+                onPress={() => setFeeVisible(false)}
+                disabled={feeSaving}
+                style={styles.closeBtn}
+              >
+                <Feather name="x" size={20} color={colors.neutral.textMuted} />
+              </TouchableOpacity>
+            </View>
+
+            <ScrollView contentContainerStyle={styles.modalContent}>
+              <InputField
+                label="Fee Amount"
+                icon="credit-card"
+                value={feeAmount}
+                onChangeText={setFeeAmount}
+                placeholder="Enter fee amount"
+                keyboardType="numeric"
+              />
+              <InputField
+                label="Description / Note (Optional)"
+                icon="file-text"
+                value={feeNote}
+                onChangeText={setFeeNote}
+                placeholder="Add a note"
+                multiline
+                numberOfLines={3}
+              />
+
+              <Text style={styles.readOnlyHint}>Due date is automatically set by the database to 21 days from today.</Text>
+
+              <View style={styles.modalActions}>
+                <PrimaryButton
+                  title="Cancel"
+                  onPress={() => setFeeVisible(false)}
+                  loading={false}
+                  style={styles.cancelBtn}
+                  textStyle={styles.cancelBtnText}
+                />
+                <PrimaryButton
+                  title={feeSaving ? 'Updating...' : 'Update Fee'}
+                  onPress={handleSaveFee}
+                  loading={feeSaving}
+                  style={styles.saveBtn}
+                />
+              </View>
+            </ScrollView>
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 }
@@ -487,6 +615,20 @@ const styles = StyleSheet.create({
     fontWeight: typography.weights.semibold,
     color: colors.neutral.textPrimary,
     marginBottom: spacing.sm,
+  },
+  cardTitleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  feeEditBtn: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: colors.primary.main,
+    marginTop: -2,
   },
   meta: {
     fontSize: typography.sizes.md,
@@ -507,6 +649,11 @@ const styles = StyleSheet.create({
     fontWeight: typography.weights.bold,
     color: colors.neutral.textPrimary,
     marginTop: spacing.sm,
+  },
+  feeHint: {
+    marginTop: spacing.xs,
+    fontSize: typography.sizes.sm,
+    color: colors.neutral.textMuted,
   },
   helper: {
     textAlign: 'center',

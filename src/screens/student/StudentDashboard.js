@@ -123,8 +123,6 @@ export default function StudentDashboard({ navigation }) {
   }
 
   const quickActions = [
-    { label: 'Movement Request', icon: 'arrow-right-circle', screen: 'MovementRequest', color: colors.primary.main },
-    { label: 'Raise Complaint', icon: 'alert-triangle', screen: 'Complaint', color: colors.status.pending },
     { label: 'View Fee Status', icon: 'credit-card', screen: 'FeePayment', color: colors.status.approved },
   ];
 
