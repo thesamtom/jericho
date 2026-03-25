@@ -8,6 +8,8 @@ import { colors } from '../theme';
 import AdminDashboard from '../screens/admin/AdminDashboard';
 import HostelStudents from '../screens/admin/HostelStudents';
 import StudentMovementHistory from '../screens/admin/StudentMovementHistory';
+import AdminStudentDetail from '../screens/admin/AdminStudentDetail';
+import AdminAddEntity from '../screens/admin/AdminAddEntity';
 
 // Student
 import StudentDashboard from '../screens/student/StudentDashboard';
@@ -40,6 +42,8 @@ function AdminHome() {
     <Stack.Navigator screenOptions={screenOptions}>
       <Stack.Screen name="AdminHome" component={AdminDashboard} />
       <Stack.Screen name="HostelStudents" component={HostelStudents} />
+      <Stack.Screen name="AdminStudentDetail" component={AdminStudentDetail} />
+      <Stack.Screen name="AdminAddEntity" component={AdminAddEntity} />
       <Stack.Screen name="StudentMovementHistory" component={StudentMovementHistory} />
     </Stack.Navigator>
   );
