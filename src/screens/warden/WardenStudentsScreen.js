@@ -195,6 +195,19 @@ export default function WardenStudentsScreen() {
     [students, selectedTab]
   );
 
+  // Calculate present and absent counts
+  const presentCount = useMemo(
+    () => students.filter((student) => student.status === 'present').length,
+    [students]
+  );
+
+  const absentCount = useMemo(
+    () => students.filter((student) => student.status === 'absent').length,
+    [students]
+  );
+
+  const countLabel = selectedTab === 'present' ? `Present Students: ${presentCount}` : `Absent Students: ${absentCount}`;
+
   function renderStudent({ item }) {
     const isPresentTab = selectedTab === 'present';
     const isUpdating = Boolean(updatingById[item.id]);
@@ -244,6 +257,11 @@ export default function WardenStudentsScreen() {
             Last updated at {formatTimeDisplay(lastUpdatedAt)}
           </Text>
         ) : null}
+
+        {/* Count Display Card */}
+        <View style={styles.countCard}>
+          <Text style={styles.countLabel}>{countLabel}</Text>
+        </View>
 
         <View style={styles.toggleWrap}>
           <TouchableOpacity
@@ -296,6 +314,22 @@ const styles = StyleSheet.create({
     fontSize: typography.sizes.sm,
     color: colors.neutral.textMuted,
     marginBottom: spacing.sm,
+  },
+  countCard: {
+    backgroundColor: colors.neutral.background,
+    borderWidth: 1,
+    borderColor: colors.neutral.border,
+    borderRadius: borderRadius.md,
+    paddingVertical: spacing.sm,
+    paddingHorizontal: spacing.md,
+    marginBottom: spacing.md,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  countLabel: {
+    fontSize: typography.sizes.md,
+    fontWeight: typography.weights.semibold,
+    color: colors.primary.main,
   },
   toggleWrap: {
     flexDirection: 'row',
