@@ -19,7 +19,6 @@ import { colors, spacing, typography } from '../../theme';
 const FILTER_OPTIONS = [
   { key: 'all', label: 'All' },
   { key: 'pending', label: 'Pending' },
-  { key: 'in_progress', label: 'In Progress' },
   { key: 'resolved', label: 'Resolved' },
 ];
 
