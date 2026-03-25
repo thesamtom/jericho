@@ -13,6 +13,7 @@ import {
 import { ScreenHeader, InputField, PrimaryButton, Card, StatusBadge } from '../../components';
 import { useAuth } from '../../context/AuthContext';
 import { supabase } from '../../lib/supabase';
+import { formatDateDisplay, formatTimeDisplay } from '../../lib/dateTime';
 import { colors, spacing, typography } from '../../theme';
 
 const FILTER_OPTIONS = [
@@ -182,7 +183,7 @@ export default function ComplaintScreen() {
       >
         {lastUpdatedAt ? (
           <Text style={styles.lastUpdated}>
-            Last updated at {lastUpdatedAt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+            Last updated at {formatTimeDisplay(lastUpdatedAt)}
           </Text>
         ) : null}
         {/* Submit Form */}
@@ -242,7 +243,7 @@ export default function ComplaintScreen() {
                 <StatusBadge status={item.status} />
               </View>
               <Text style={styles.date}>
-                {new Date(item.created_at).toLocaleDateString()}
+                {formatDateDisplay(item.created_at)}
               </Text>
             </Card>
           ))

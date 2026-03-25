@@ -7,6 +7,7 @@ export const colors = {
   },
   status: {
     approved: '#16A34A',
+    paid: '#16A34A',
     pending: '#F59E0B',
     rejected: '#DC2626',
     resolved: '#16A34A',
@@ -14,6 +15,7 @@ export const colors = {
   },
   statusBg: {
     approved: '#DCFCE7',
+    paid: '#DCFCE7',
     pending: '#FEF3C7',
     rejected: '#FEE2E2',
     resolved: '#DCFCE7',

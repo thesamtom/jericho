@@ -23,6 +23,8 @@ import WardenDashboard from '../screens/warden/WardenDashboard';
 import WardenComplaintsScreen from '../screens/warden/WardenComplaintsScreen';
 import WardenComplaintDetailScreen from '../screens/warden/WardenComplaintDetailScreen';
 import WardenStudentsScreen from '../screens/warden/WardenStudentsScreen';
+import WardenFeeDefaultersScreen from '../screens/warden/WardenFeeDefaultersScreen';
+import WardenMovementRequestDetailScreen from '../screens/warden/WardenMovementRequestDetailScreen';
 
 // Shared
 import ProfileScreen from '../screens/ProfileScreen';
@@ -146,6 +148,8 @@ function WardenHome() {
   return (
     <Stack.Navigator screenOptions={screenOptions}>
       <Stack.Screen name="WardenHome" component={WardenDashboard} />
+      <Stack.Screen name="WardenFeeDefaulters" component={WardenFeeDefaultersScreen} />
+      <Stack.Screen name="WardenMovementRequestDetail" component={WardenMovementRequestDetailScreen} />
     </Stack.Navigator>
   );
 }

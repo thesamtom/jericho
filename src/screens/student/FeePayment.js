@@ -3,24 +3,28 @@ import {
   View,
   Text,
   ScrollView,
-  TouchableOpacity,
   StyleSheet,
   Alert,
   RefreshControl,
   Platform,
   ToastAndroid,
 } from 'react-native';
-import { ScreenHeader, Card, StatusBadge, PrimaryButton } from '../../components';
+import { ScreenHeader, Card, StatusBadge } from '../../components';
 import { useAuth } from '../../context/AuthContext';
 import { supabase } from '../../lib/supabase';
-import { colors, spacing, typography, borderRadius } from '../../theme';
+import { formatDateDisplay, formatTimeDisplay } from '../../lib/dateTime';
+import { colors, spacing, typography } from '../../theme';
 
-const PAYMENT_METHODS = ['UPI', 'Card', 'Cash'];
+function normalizeFeeStatus(status) {
+  const value = String(status || '').toLowerCase();
+  return value === 'paid' ? 'paid' : 'pending';
+}
 
 export default function FeePayment() {
   const { user } = useAuth();
+  const studentId = user?.student_id || user?.id;
   const [fees, setFees] = useState([]);
-  const [selectedMethod, setSelectedMethod] = useState('UPI');
+  const [pendingTotal, setPendingTotal] = useState(0);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [lastUpdatedAt, setLastUpdatedAt] = useState(null);
@@ -41,17 +45,48 @@ export default function FeePayment() {
 
   async function loadFees({ isRefresh = false, showError = false } = {}) {
     try {
-      const { data, error } = await supabase
+      if (!studentId) {
+        setFees([]);
+        setPendingTotal(0);
+        return;
+      }
+
+      let { data, error } = await supabase
         .from('fee')
         .select('*')
-        .eq('student_id', user?.id)
+        .eq('student_id', studentId)
         .order('due_date', { ascending: false });
+
+      if (error) {
+        const retry = await supabase
+          .from('fee')
+          .select('*')
+          .eq('student_id', Number(studentId))
+          .order('due_date', { ascending: false });
+        data = retry.data;
+        error = retry.error;
+      }
+
       if (error) throw error;
-      setFees(data || []);
+
+      const normalizedFees = (data || []).map((item) => ({
+        ...item,
+        status: normalizeFeeStatus(item.status),
+      }));
+      setFees(normalizedFees);
+
+      const total = normalizedFees
+        .filter((item) => item.status === 'pending')
+        .reduce((sum, item) => sum + Number(item.amount || 0), 0);
+      setPendingTotal(total);
+
       setLastUpdatedAt(new Date());
     } catch {
       if (showError) showRefreshError();
-      if (!isRefresh) setFees([]);
+      if (!isRefresh) {
+        setFees([]);
+        setPendingTotal(0);
+      }
     } finally {
       if (!isRefresh) setLoading(false);
     }
@@ -69,31 +104,9 @@ export default function FeePayment() {
     setLastRefreshMs(Date.now());
   }
 
-  async function handlePay(feeId) {
-    try {
-      const { error } = await supabase.from('payment').insert({
-        fee_id: feeId,
-        student_id: user?.id,
-        method: selectedMethod,
-        paid_at: new Date().toISOString(),
-      });
-      if (error) throw error;
-
-      await supabase
-        .from('fee')
-        .update({ status: 'approved' })
-        .eq('id', feeId);
-
-      Alert.alert('Success', 'Payment recorded');
-      loadFees();
-    } catch (err) {
-      Alert.alert('Error', err.message);
-    }
-  }
-
   return (
     <View style={styles.flex}>
-      <ScreenHeader title="Fee Payment" subtitle="View and pay fees" />
+      <ScreenHeader title="Fee Payment" subtitle="View fee status" />
       <ScrollView
         contentContainerStyle={styles.content}
         refreshControl={
@@ -102,24 +115,16 @@ export default function FeePayment() {
       >
         {lastUpdatedAt ? (
           <Text style={styles.lastUpdated}>
-            Last updated at {lastUpdatedAt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+            Last updated at {formatTimeDisplay(lastUpdatedAt)}
           </Text>
         ) : null}
-        {/* Payment Method */}
-        <Text style={styles.sectionTitle}>Payment Method</Text>
-        <View style={styles.methodRow}>
-          {PAYMENT_METHODS.map((m) => (
-            <TouchableOpacity
-              key={m}
-              style={[styles.methodChip, selectedMethod === m && styles.methodChipActive]}
-              onPress={() => setSelectedMethod(m)}
-            >
-              <Text style={[styles.methodText, selectedMethod === m && styles.methodTextActive]}>
-                {m}
-              </Text>
-            </TouchableOpacity>
-          ))}
-        </View>
+
+        <Card style={styles.summaryCard}>
+          <Text style={styles.summaryLabel}>Total Pending Amount</Text>
+          <Text style={styles.summaryValue}>
+            {pendingTotal > 0 ? `INR ${pendingTotal}` : 'No pending fees'}
+          </Text>
+        </Card>
 
         {/* Fee Cards */}
         <Text style={styles.sectionTitle}>Fee Records</Text>
@@ -129,19 +134,12 @@ export default function FeePayment() {
           </Text>
         ) : (
           fees.map((fee) => (
-            <Card key={fee.id} style={styles.feeCard}>
+            <Card key={String(fee.fee_id || fee.id || `${fee.student_id}-${fee.due_date}`)} style={styles.feeCard}>
               <View style={styles.feeRow}>
                 <Text style={styles.feeAmount}>₹{fee.amount}</Text>
                 <StatusBadge status={fee.status} />
               </View>
-              <Text style={styles.feeDetail}>Due: {fee.due_date}</Text>
-              {fee.status === 'pending' && (
-                <PrimaryButton
-                  title={`Pay via ${selectedMethod}`}
-                  onPress={() => handlePay(fee.id)}
-                  style={{ marginTop: spacing.sm }}
-                />
-              )}
+              <Text style={styles.feeDetail}>Due: {formatDateDisplay(fee.due_date)}</Text>
             </Card>
           ))
         )}
@@ -158,36 +156,22 @@ const styles = StyleSheet.create({
     color: colors.neutral.textMuted,
     marginBottom: spacing.sm,
   },
+  summaryCard: { marginBottom: spacing.sectionGap },
+  summaryLabel: {
+    fontSize: typography.sizes.md,
+    color: colors.neutral.textSecondary,
+  },
+  summaryValue: {
+    marginTop: 4,
+    fontSize: typography.sizes['2xl'],
+    fontWeight: typography.weights.bold,
+    color: colors.neutral.textPrimary,
+  },
   sectionTitle: {
     fontSize: typography.sizes.xl,
     fontWeight: typography.weights.semibold,
     color: colors.neutral.textPrimary,
     marginBottom: spacing.md,
-  },
-  methodRow: {
-    flexDirection: 'row',
-    gap: 8,
-    marginBottom: spacing.sectionGap,
-  },
-  methodChip: {
-    paddingHorizontal: 20,
-    paddingVertical: 10,
-    borderRadius: borderRadius.pill,
-    backgroundColor: colors.neutral.surface,
-    borderWidth: 1,
-    borderColor: colors.neutral.border,
-  },
-  methodChipActive: {
-    backgroundColor: colors.primary.main,
-    borderColor: colors.primary.main,
-  },
-  methodText: {
-    fontSize: typography.sizes.md,
-    fontWeight: typography.weights.medium,
-    color: colors.neutral.textSecondary,
-  },
-  methodTextActive: {
-    color: '#FFFFFF',
   },
   feeCard: { marginBottom: spacing.md },
   feeRow: {

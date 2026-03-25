@@ -12,6 +12,7 @@ import {
 import { ScreenHeader, Card } from '../../components';
 import { useAuth } from '../../context/AuthContext';
 import { supabase } from '../../lib/supabase';
+import { formatTimeDisplay } from '../../lib/dateTime';
 import { colors, spacing, typography, borderRadius } from '../../theme';
 
 function normalizePresenceStatus(status) {
@@ -203,7 +204,7 @@ export default function WardenStudentsScreen() {
       <View style={styles.container}>
         {lastUpdatedAt ? (
           <Text style={styles.lastUpdated}>
-            Last updated at {lastUpdatedAt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+            Last updated at {formatTimeDisplay(lastUpdatedAt)}
           </Text>
         ) : null}
 

@@ -60,6 +60,9 @@ export default function MovementRequest({ navigation }) {
         return_date: formatDate(returnDate),
         return_time: formatTime(returnTime),
         reason: reason.trim(),
+        warden_status: 'pending',
+        parent_status: 'pending',
+        final_status: 'pending',
       });
       if (error) throw error;
       Alert.alert('Success', 'Movement request submitted', [

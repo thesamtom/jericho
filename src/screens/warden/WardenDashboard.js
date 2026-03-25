@@ -5,22 +5,27 @@ import {
   ScrollView,
   TouchableOpacity,
   StyleSheet,
-  Alert,
   RefreshControl,
+  Alert,
   Platform,
   ToastAndroid,
 } from 'react-native';
 import { Feather } from '@expo/vector-icons';
 import { ScreenHeader, Card, StatusBadge } from '../../components';
+import { useAuth } from '../../context/AuthContext';
 import { supabase } from '../../lib/supabase';
-import { colors, spacing, typography, borderRadius } from '../../theme';
+import { formatDateRangeDisplay, formatTimeDisplay } from '../../lib/dateTime';
+import { colors, spacing, typography, borderRadius, shadows } from '../../theme';
 
 export default function WardenDashboard({ navigation }) {
-  const [pendingRequests, setPendingRequests] = useState([]);
-  const [complaints, setComplaints] = useState([]);
+  const { user } = useAuth();
+  const [recentRequests, setRecentRequests] = useState([]);
+  const [hostelId, setHostelId] = useState(null);
+  const [hostelStatus, setHostelStatus] = useState('Not Assigned');
   const [refreshing, setRefreshing] = useState(false);
   const [lastUpdatedAt, setLastUpdatedAt] = useState(null);
   const [lastRefreshMs, setLastRefreshMs] = useState(0);
+  const [processingId, setProcessingId] = useState(null);
 
   useEffect(() => {
     loadData();
@@ -35,24 +40,94 @@ export default function WardenDashboard({ navigation }) {
     Alert.alert('Refresh Failed', message);
   }
 
+  async function resolveWardenHostelId() {
+    if (user?.hostel_id) return user.hostel_id;
+
+    const candidateId = user?.warden_id || user?.id;
+    if (!candidateId) return null;
+
+    const byWardenId = await supabase
+      .from('warden')
+      .select('*')
+      .eq('warden_id', candidateId)
+      .maybeSingle();
+
+    if (byWardenId.data?.hostel_id) return byWardenId.data.hostel_id;
+
+    const byId = await supabase
+      .from('warden')
+      .select('*')
+      .eq('id', candidateId)
+      .maybeSingle();
+
+    return byId.data?.hostel_id || null;
+  }
+
   async function loadData({ showError = false } = {}) {
     try {
-      // Movement requests where parent approved and warden still pending
-      const { data: requests } = await supabase
-        .from('movement_request')
-        .select('*')
-        .eq('parent_status', 'Approved')
-        .eq('warden_status', 'Pending')
-        .order('created_at', { ascending: false });
-      if (requests) setPendingRequests(requests);
+      const resolvedHostelId = await resolveWardenHostelId();
+      setHostelId(resolvedHostelId);
+      setHostelStatus(resolvedHostelId ? 'Active' : 'Not Assigned');
 
-      // Open complaints
-      const { data: complaintData } = await supabase
-        .from('complaint')
-        .select('*')
-        .in('status', ['pending', 'in_progress'])
-        .order('created_at', { ascending: false });
-      if (complaintData) setComplaints(complaintData);
+      if (resolvedHostelId) {
+        const { data: studentRows, error: studentError } = await supabase
+          .from('student')
+          .select('*')
+          .eq('hostel_id', resolvedHostelId);
+
+        if (studentError) throw studentError;
+
+        const studentIds = (studentRows || [])
+          .map((row) => String(row.student_id || row.id || ''))
+          .filter(Boolean);
+
+        const studentMap = {};
+        (studentRows || []).forEach((row) => {
+          const key = String(row.student_id || row.id || '');
+          if (!key) return;
+          studentMap[key] = row;
+        });
+
+        if (studentIds.length === 0) {
+          setRecentRequests([]);
+        } else {
+          const { data: requestRows, error: requestError } = await supabase
+            .from('movement_request')
+            .select('*')
+            .order('created_at', { ascending: false })
+            .limit(40);
+
+          if (requestError) throw requestError;
+
+          const hostelRequests = (requestRows || [])
+            .filter((row) => studentIds.includes(String(row.student_id || '')))
+            .filter((row) => {
+              const finalStatus = String(row.final_status || '').toLowerCase();
+              const parentStatus = String(row.parent_status || '').toLowerCase();
+              const wardenStatus = String(row.warden_status || '').toLowerCase();
+
+              if (finalStatus === 'approved' || finalStatus === 'rejected') return false;
+              if (parentStatus === 'rejected' || wardenStatus === 'rejected') return false;
+
+              return wardenStatus === 'pending' || !wardenStatus;
+            })
+            .slice(0, 5)
+            .map((row) => {
+              const key = String(row.student_id || '');
+              const student = studentMap[key] || {};
+              return {
+                ...row,
+                studentName: student.name || `Student ${key}`,
+                studentCode: key,
+              };
+            });
+
+          setRecentRequests(hostelRequests);
+        }
+      } else {
+        setRecentRequests([]);
+      }
+
       setLastUpdatedAt(new Date());
       return true;
     } catch {
@@ -73,65 +148,82 @@ export default function WardenDashboard({ navigation }) {
     setLastRefreshMs(Date.now());
   }
 
-  function toDateTime(dateValue, timeValue, isEndOfRange) {
-    if (!dateValue) return null;
-    const fallbackTime = isEndOfRange ? '23:59' : '00:00';
-    const time = String(timeValue || fallbackTime);
-    const composed = `${String(dateValue)}T${time}:00`;
-    const parsed = new Date(composed);
-    return Number.isNaN(parsed.getTime()) ? null : parsed;
-  }
+  async function updateRequestStatus(requestId, wardenAction) {
+    if (!requestId || processingId) return;
 
-  function deriveStudentStatusFromRequestWindow(requestRow) {
-    const now = new Date();
-    const leaveAt = toDateTime(requestRow?.leave_date, requestRow?.leave_time, false);
-    const returnAt = toDateTime(requestRow?.return_date, requestRow?.return_time, true);
-
-    if (!leaveAt || !returnAt) return 'present';
-    if (now >= leaveAt && now <= returnAt) return 'absent';
-    return 'present';
-  }
-
-  async function handleRequestAction(requestId, action) {
     try {
-      const updates = { warden_status: action };
-      // If warden approves and parent already approved, set final status
-      const req = pendingRequests.find((r) => r.request_id === requestId);
-      if (action === 'Approved' && req?.parent_status === 'Approved') {
-        updates.final_status = 'Approved';
-      } else if (action === 'Rejected') {
-        updates.final_status = 'Rejected';
+      setProcessingId(requestId);
+
+      const request = recentRequests.find((r) => r.request_id === requestId);
+      if (!request) {
+        Alert.alert('Error', 'Request not found');
+        return;
+      }
+
+      const wardenStatusValue = wardenAction === 'approved' ? 'approved' : 'rejected';
+      const parentStatus = String(request.parent_status || 'pending').toLowerCase();
+
+      // Only update warden_status; final_status updates only on specific conditions
+      let computedFinalStatus = null;
+      if (wardenAction === 'rejected' || parentStatus === 'rejected') {
+        computedFinalStatus = 'rejected';
+      } else if (wardenAction === 'approved' && parentStatus === 'approved') {
+        computedFinalStatus = 'approved';
+      }
+
+      const updatePayload = { warden_status: wardenStatusValue };
+      if (computedFinalStatus) {
+        updatePayload.final_status = computedFinalStatus;
       }
 
       const { error } = await supabase
         .from('movement_request')
-        .update(updates)
+        .update(updatePayload)
         .eq('request_id', requestId);
-      if (error) throw error;
 
-      if (req?.student_id && updates.final_status === 'Approved') {
-        const nextStatus = deriveStudentStatusFromRequestWindow(req);
-        const studentUpdate = await supabase
-          .from('student')
-          .update({ status: nextStatus })
-          .eq('student_id', req.student_id);
-        if (studentUpdate.error) throw studentUpdate.error;
+      if (error) {
+        console.error('Supabase error:', error);
+        throw error;
       }
 
-      if (req?.student_id && action === 'Rejected') {
-        const studentUpdate = await supabase
-          .from('student')
-          .update({ status: 'present' })
-          .eq('student_id', req.student_id);
-        if (studentUpdate.error) throw studentUpdate.error;
+      // Show success message
+      const message = wardenAction === 'approved' ? 'Request approved!' : 'Request rejected!';
+      if (Platform.OS === 'android') {
+        ToastAndroid.show(message, ToastAndroid.SHORT);
+      } else {
+        Alert.alert('Success', message);
       }
 
-      Alert.alert('Success', `Request ${action}`);
-      loadData();
-    } catch (err) {
-      Alert.alert('Error', err.message);
+      // Reload data
+      await loadData();
+    } catch (error) {
+      console.error('Full error:', error.message);
+      Alert.alert('Error', error.message || 'Failed to update request');
+    } finally {
+      setProcessingId(null);
     }
   }
+
+  const quickActions = [
+    {
+      label: 'View Complaints',
+      icon: 'alert-triangle',
+      color: colors.status.pending,
+      onPress: () => navigation.navigate('Complaints'),
+    },
+    {
+      label: 'View Pending Fees',
+      icon: 'credit-card',
+      color: colors.status.rejected,
+      onPress: () => navigation.navigate('WardenFeeDefaulters'),
+    },
+    {
+      label: 'View Students',
+      icon: 'users',
+      color: colors.status.approved,
+      onPress: () => navigation.navigate('Students'),
+    },
+  ];
 
   return (
     <View style={styles.flex}>
@@ -144,63 +236,102 @@ export default function WardenDashboard({ navigation }) {
       >
         {lastUpdatedAt ? (
           <Text style={styles.lastUpdated}>
-            Last updated at {lastUpdatedAt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+            Last updated at {formatTimeDisplay(lastUpdatedAt)}
           </Text>
         ) : null}
-        {/* Movement Approvals */}
-        <Text style={styles.sectionTitle}>Movement Approvals</Text>
-        {pendingRequests.length === 0 ? (
-          <Text style={styles.empty}>No pending requests</Text>
-        ) : (
-          pendingRequests.map((req) => (
-            <Card key={req.request_id} style={styles.card}>
-              <View style={styles.cardHeader}>
-                <Text style={styles.cardTitle}>Student: {req.student_id}</Text>
-                <StatusBadge status={req.parent_status} />
+
+        <Card style={styles.statusCard}>
+          <View style={styles.statusRow}>
+            <View>
+              <Text style={styles.statusLabel}>Hostel Status</Text>
+              <Text style={styles.statusValue}>{hostelStatus}</Text>
+            </View>
+            <View
+              style={[
+                styles.statusDot,
+                { backgroundColor: hostelStatus === 'Active' ? colors.status.approved : colors.status.rejected },
+              ]}
+            />
+          </View>
+        </Card>
+
+        <Text style={styles.sectionTitle}>Quick Actions</Text>
+        <View style={styles.actionsRow}>
+          {quickActions.map((action) => (
+            <TouchableOpacity
+              key={action.label}
+              style={styles.actionCard}
+              onPress={action.onPress}
+              activeOpacity={0.7}
+            >
+              <View style={[styles.actionIcon, { backgroundColor: `${action.color}18` }]}>
+                <Feather name={action.icon} size={24} color={action.color} />
               </View>
-              <Text style={styles.cardDetail}>{req.reason || 'Movement Request'}</Text>
-              <Text style={styles.cardMeta}>
-                {req.leave_date} → {req.return_date}
+              <Text style={styles.actionLabel}>{action.label}</Text>
+            </TouchableOpacity>
+          ))}
+        </View>
+
+        <Text style={styles.sectionTitle}>Recent Requests</Text>
+        {recentRequests.length === 0 ? (
+          <Text style={styles.empty}>No recent requests</Text>
+        ) : (
+          recentRequests.map((req) => (
+            <Card key={String(req.request_id || `${req.student_id}-${req.created_at}`)} style={styles.requestCard}>
+              <View style={styles.requestRow}>
+                <Text style={styles.requestReason}>{req.reason || 'Movement Request'}</Text>
+                <StatusBadge status="pending" />
+              </View>
+              <Text style={styles.requestMeta}>Student: {req.studentName}</Text>
+              <Text style={styles.requestMeta}>Student ID: {req.studentCode}</Text>
+              <Text style={styles.requestDate}>
+                {formatDateRangeDisplay(req.leave_date, req.return_date, req.leave_time, req.return_time)}
               </Text>
-              <View style={styles.actionRow}>
+
+              <View style={styles.buttonRow}>
                 <TouchableOpacity
-                  style={[styles.actionBtn, styles.approveBtn]}
-                  onPress={() => handleRequestAction(req.request_id, 'Approved')}
+                  style={[styles.approveBtn, processingId === req.request_id && styles.disabledBtn]}
+                  onPress={() => updateRequestStatus(req.request_id, 'approved')}
+                  disabled={processingId === req.request_id}
+                  activeOpacity={0.7}
                 >
-                  <Feather name="check" size={16} color="#FFF" />
-                  <Text style={styles.actionText}>Approve</Text>
+                  <Feather
+                    name="check"
+                    size={18}
+                    color={colors.neutral.surface}
+                    style={styles.btnIcon}
+                  />
+                  <Text style={styles.approveBtnText}>
+                    {processingId === req.request_id ? 'Processing...' : 'Approve'}
+                  </Text>
                 </TouchableOpacity>
+
                 <TouchableOpacity
-                  style={[styles.actionBtn, styles.rejectBtn]}
-                  onPress={() => handleRequestAction(req.request_id, 'Rejected')}
+                  style={[styles.rejectBtn, processingId === req.request_id && styles.disabledBtn]}
+                  onPress={() => updateRequestStatus(req.request_id, 'rejected')}
+                  disabled={processingId === req.request_id}
+                  activeOpacity={0.7}
                 >
-                  <Feather name="x" size={16} color="#FFF" />
-                  <Text style={styles.actionText}>Reject</Text>
+                  <Feather
+                    name="x"
+                    size={18}
+                    color={colors.neutral.surface}
+                    style={styles.btnIcon}
+                  />
+                  <Text style={styles.rejectBtnText}>
+                    {processingId === req.request_id ? 'Processing...' : 'Reject'}
+                  </Text>
                 </TouchableOpacity>
               </View>
             </Card>
           ))
         )}
 
-        {/* Complaints */}
-        <Text style={styles.sectionTitle}>Open Complaints</Text>
-        {complaints.length === 0 ? (
-          <Text style={styles.empty}>No open complaints</Text>
-        ) : (
-          complaints.map((item) => (
-            <Card key={String(item.complaint_id || item.id || `${item.student_id}-${item.created_at}`)} style={styles.card}>
-              <View style={styles.cardHeader}>
-                <Text style={styles.cardDetail} numberOfLines={2}>
-                  {item.complaint_text || item.description || 'Complaint'}
-                </Text>
-                <StatusBadge status={item.status} />
-              </View>
-              <Text style={styles.cardMeta}>
-                {new Date(item.created_at).toLocaleDateString()}
-              </Text>
-            </Card>
-          ))
-        )}
+        {!hostelId ? (
+          <Text style={styles.helperText}>
+            Warden hostel mapping is missing. Ask admin to assign this warden to a hostel.
+          </Text>
+        ) : null}
       </ScrollView>
     </View>
   );
@@ -214,62 +345,139 @@ const styles = StyleSheet.create({
     color: colors.neutral.textMuted,
     marginBottom: spacing.sm,
   },
+  statusCard: { marginBottom: spacing.sectionGap },
+  statusRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  statusLabel: {
+    fontSize: typography.sizes.md,
+    color: colors.neutral.textSecondary,
+  },
+  statusValue: {
+    fontSize: typography.sizes.xl,
+    fontWeight: typography.weights.bold,
+    color: colors.neutral.textPrimary,
+    marginTop: 2,
+  },
+  statusDot: {
+    width: 14,
+    height: 14,
+    borderRadius: 7,
+  },
   sectionTitle: {
     fontSize: typography.sizes.xl,
     fontWeight: typography.weights.semibold,
     color: colors.neutral.textPrimary,
     marginBottom: spacing.md,
-    marginTop: spacing.sectionGap,
   },
-  card: { marginBottom: spacing.md },
-  cardHeader: {
+  actionsRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginBottom: spacing.sectionGap,
+  },
+  actionCard: {
+    backgroundColor: colors.neutral.background,
+    borderWidth: 1,
+    borderColor: colors.neutral.border,
+    borderRadius: borderRadius.md,
+    padding: spacing.cardPadding,
+    alignItems: 'center',
+    flex: 1,
+    marginHorizontal: 4,
+    ...shadows.card,
+  },
+  actionIcon: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 8,
+  },
+  actionLabel: {
+    fontSize: typography.sizes.sm,
+    fontWeight: typography.weights.medium,
+    color: colors.neutral.textPrimary,
+    textAlign: 'center',
+  },
+  requestCard: { marginBottom: spacing.sm },
+  requestRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
     marginBottom: 4,
   },
-  cardTitle: {
-    fontSize: typography.sizes.lg,
-    fontWeight: typography.weights.semibold,
-    color: colors.neutral.textPrimary,
-  },
-  cardDetail: {
+  requestReason: {
     fontSize: typography.sizes.md,
+    fontWeight: typography.weights.semibold,
     color: colors.neutral.textPrimary,
     flex: 1,
     marginRight: 8,
   },
-  cardMeta: {
+  requestDate: {
     fontSize: typography.sizes.sm,
     color: colors.neutral.textMuted,
-    marginTop: 4,
-    marginBottom: spacing.sm,
   },
-  actionRow: {
-    flexDirection: 'row',
-    gap: 8,
-    marginTop: 4,
-  },
-  actionBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 16,
-    paddingVertical: 10,
-    borderRadius: borderRadius.sm,
-    gap: 6,
-  },
-  approveBtn: { backgroundColor: colors.status.approved },
-  rejectBtn: { backgroundColor: colors.status.rejected },
-  actionText: {
-    color: '#FFFFFF',
-    fontSize: typography.sizes.md,
-    fontWeight: typography.weights.semibold,
+  requestMeta: {
+    fontSize: typography.sizes.sm,
+    color: colors.neutral.textSecondary,
+    marginBottom: 2,
   },
   empty: {
     textAlign: 'center',
     color: colors.neutral.textMuted,
-    marginTop: 10,
-    marginBottom: spacing.md,
+    marginTop: 20,
     fontSize: typography.sizes.md,
+  },
+  helperText: {
+    textAlign: 'center',
+    color: colors.status.rejected,
+    marginTop: spacing.sm,
+    fontSize: typography.sizes.sm,
+  },
+  buttonRow: {
+    flexDirection: 'row',
+    gap: spacing.sm,
+    marginTop: spacing.md,
+  },
+  approveBtn: {
+    flex: 1,
+    flexDirection: 'row',
+    backgroundColor: colors.status.approved,
+    paddingVertical: spacing.sm,
+    paddingHorizontal: spacing.md,
+    borderRadius: borderRadius.sm,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  approveBtnText: {
+    color: colors.neutral.surface,
+    fontSize: typography.sizes.sm,
+    fontWeight: typography.weights.semibold,
+    marginLeft: 6,
+  },
+  rejectBtn: {
+    flex: 1,
+    flexDirection: 'row',
+    backgroundColor: colors.status.rejected,
+    paddingVertical: spacing.sm,
+    paddingHorizontal: spacing.md,
+    borderRadius: borderRadius.sm,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  rejectBtnText: {
+    color: colors.neutral.surface,
+    fontSize: typography.sizes.sm,
+    fontWeight: typography.weights.semibold,
+    marginLeft: 6,
+  },
+  btnIcon: {
+    marginRight: 4,
+  },
+  disabledBtn: {
+    opacity: 0.5,
   },
 });

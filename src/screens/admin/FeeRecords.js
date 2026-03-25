@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { View, Text, FlatList, StyleSheet, Alert, Platform, ToastAndroid } from 'react-native';
 import { ScreenHeader, Card, StatusBadge } from '../../components';
 import { supabase } from '../../lib/supabase';
+import { formatDateDisplay } from '../../lib/dateTime';
 import { colors, spacing, typography } from '../../theme';
 
 export default function FeeRecords() {
@@ -57,7 +58,7 @@ export default function FeeRecords() {
           <StatusBadge status={item.status} />
         </View>
         <Text style={styles.detail}>Amount: ₹{item.amount}</Text>
-        <Text style={styles.detail}>Due: {item.due_date}</Text>
+        <Text style={styles.detail}>Due: {formatDateDisplay(item.due_date)}</Text>
       </Card>
     );
   }

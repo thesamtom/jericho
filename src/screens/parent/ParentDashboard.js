@@ -11,16 +11,23 @@ import {
   ToastAndroid,
 } from 'react-native';
 import { Feather } from '@expo/vector-icons';
-import { ScreenHeader, Card, StatusBadge, PrimaryButton } from '../../components';
+import { ScreenHeader, Card, StatusBadge } from '../../components';
 import { useAuth } from '../../context/AuthContext';
 import { supabase } from '../../lib/supabase';
+import { formatDateDisplay, formatDateRangeDisplay, formatTimeDisplay } from '../../lib/dateTime';
 import { colors, spacing, typography, borderRadius, shadows } from '../../theme';
 
-export default function ParentDashboard({ navigation }) {
+function normalizeFeeStatus(status) {
+  const value = String(status || '').toLowerCase();
+  return value === 'paid' ? 'paid' : 'pending';
+}
+
+export default function ParentDashboard() {
   const { user } = useAuth();
   const [studentInfo, setStudentInfo] = useState(null);
   const [pendingRequests, setPendingRequests] = useState([]);
   const [fees, setFees] = useState([]);
+  const [pendingTotal, setPendingTotal] = useState(0);
   const [refreshing, setRefreshing] = useState(false);
   const [lastUpdatedAt, setLastUpdatedAt] = useState(null);
   const [lastRefreshMs, setLastRefreshMs] = useState(0);
@@ -43,11 +50,21 @@ export default function ParentDashboard({ navigation }) {
       const parentId = user?.parent_id || user?.id;
 
       // Load linked student info
-      const { data: student, error: studentErr } = await supabase
+      let { data: student, error: studentErr } = await supabase
         .from('student')
         .select('*')
         .eq('parent_id', parentId)
         .single();
+
+      if (studentErr) {
+        const retry = await supabase
+          .from('student')
+          .select('*')
+          .eq('parent_id', Number(parentId))
+          .single();
+        student = retry.data;
+        studentErr = retry.error;
+      }
       
       if (studentErr) console.log('Student lookup error:', JSON.stringify(studentErr));
       if (student) setStudentInfo(student);
@@ -71,13 +88,35 @@ export default function ParentDashboard({ navigation }) {
         setPendingRequests(pending);
       }
 
-      // Load pending fees
-      const { data: feeData } = await supabase
+      const linkedStudentId = student.student_id || student.id;
+      let { data: feeData, error: feeError } = await supabase
         .from('fee')
         .select('*')
-        .eq('student_id', student.student_id)
-        .eq('status', 'pending');
-      if (feeData) setFees(feeData);
+        .eq('student_id', linkedStudentId)
+        .order('due_date', { ascending: false });
+
+      if (feeError) {
+        const retry = await supabase
+          .from('fee')
+          .select('*')
+          .eq('student_id', Number(linkedStudentId))
+          .order('due_date', { ascending: false });
+        feeData = retry.data;
+        feeError = retry.error;
+      }
+
+      if (feeError) throw feeError;
+
+      const normalizedFees = (feeData || []).map((item) => ({
+        ...item,
+        status: normalizeFeeStatus(item.status),
+      }));
+
+      setFees(normalizedFees);
+      const total = normalizedFees
+        .filter((item) => item.status === 'pending')
+        .reduce((sum, item) => sum + Number(item.amount || 0), 0);
+      setPendingTotal(total);
       setLastUpdatedAt(new Date());
     } catch {
       if (showError) showRefreshError();
@@ -85,6 +124,7 @@ export default function ParentDashboard({ navigation }) {
         setStudentInfo(null);
         setPendingRequests([]);
         setFees([]);
+        setPendingTotal(0);
       }
     }
   }
@@ -108,8 +148,10 @@ export default function ParentDashboard({ navigation }) {
         .update({ parent_status: action })
         .eq('request_id', requestId);
       if (error) throw error;
-      Alert.alert('Success', `Request ${action}`);
-      loadData();
+      await loadData({ isRefresh: true });
+      if (Platform.OS === 'android') {
+        ToastAndroid.show(`Request ${action}`, ToastAndroid.SHORT);
+      }
     } catch (err) {
       Alert.alert('Error', err.message);
     }
@@ -126,7 +168,7 @@ export default function ParentDashboard({ navigation }) {
       >
         {lastUpdatedAt ? (
           <Text style={styles.lastUpdated}>
-            Last updated at {lastUpdatedAt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+            Last updated at {formatTimeDisplay(lastUpdatedAt)}
           </Text>
         ) : null}
         {/* Student Info */}
@@ -155,19 +197,19 @@ export default function ParentDashboard({ navigation }) {
             <Card key={req.request_id} style={styles.requestCard}>
               <Text style={styles.requestReason}>{req.reason || 'Movement Request'}</Text>
               <Text style={styles.requestDate}>
-                {req.leave_date} → {req.return_date}
+                {formatDateRangeDisplay(req.leave_date, req.return_date)}
               </Text>
               <View style={styles.actionRow}>
                 <TouchableOpacity
                   style={[styles.actionBtn, styles.approveBtn]}
-                  onPress={() => handleApproval(req.request_id, 'Approved')}
+                  onPress={() => handleApproval(req.request_id, 'approved')}
                 >
                   <Feather name="check" size={16} color="#FFF" />
                   <Text style={styles.actionText}>Approve</Text>
                 </TouchableOpacity>
                 <TouchableOpacity
                   style={[styles.actionBtn, styles.rejectBtn]}
-                  onPress={() => handleApproval(req.request_id, 'Rejected')}
+                  onPress={() => handleApproval(req.request_id, 'rejected')}
                 >
                   <Feather name="x" size={16} color="#FFF" />
                   <Text style={styles.actionText}>Reject</Text>
@@ -177,23 +219,24 @@ export default function ParentDashboard({ navigation }) {
           ))
         )}
 
-        {/* Fee Payment */}
-        <Text style={styles.sectionTitle}>Fee Payment</Text>
+        {/* Fee Status */}
+        <Text style={styles.sectionTitle}>Fee Status</Text>
+        <Card style={styles.feeSummaryCard}>
+          <Text style={styles.feeSummaryLabel}>Total Pending Amount</Text>
+          <Text style={styles.feeSummaryValue}>
+            {pendingTotal > 0 ? `INR ${pendingTotal}` : 'No pending fees'}
+          </Text>
+        </Card>
         {fees.length === 0 ? (
-          <Text style={styles.empty}>No pending fees</Text>
+          <Text style={styles.empty}>No fee records found</Text>
         ) : (
           fees.map((fee) => (
-            <Card key={fee.id} style={styles.feeCard}>
+            <Card key={String(fee.fee_id || fee.id || `${fee.student_id}-${fee.due_date}`)} style={styles.feeCard}>
               <View style={styles.feeRow}>
                 <Text style={styles.feeAmount}>₹{fee.amount}</Text>
                 <StatusBadge status={fee.status} />
               </View>
-              <Text style={styles.feeDetail}>Due: {fee.due_date}</Text>
-              <PrimaryButton
-                title="Pay Fee"
-                onPress={() => navigation.navigate('FeePayment')}
-                style={{ marginTop: spacing.sm }}
-              />
+              <Text style={styles.feeDetail}>Due: {formatDateDisplay(fee.due_date)}</Text>
             </Card>
           ))
         )}
@@ -272,6 +315,17 @@ const styles = StyleSheet.create({
     fontWeight: typography.weights.semibold,
   },
   feeCard: { marginBottom: spacing.md },
+  feeSummaryCard: { marginBottom: spacing.md },
+  feeSummaryLabel: {
+    fontSize: typography.sizes.md,
+    color: colors.neutral.textSecondary,
+  },
+  feeSummaryValue: {
+    marginTop: 4,
+    fontSize: typography.sizes['2xl'],
+    fontWeight: typography.weights.bold,
+    color: colors.neutral.textPrimary,
+  },
   feeRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',

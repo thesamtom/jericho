@@ -20,14 +20,14 @@ export function StatsCard({ title, value, icon, color }) {
   );
 }
 
-export function StatusBadge({ status }) {
+export function StatusBadge({ status, label }) {
   const key = status?.toLowerCase() || 'pending';
   const bgColor = colors.statusBg[key] || colors.statusBg.pending;
   const textColor = colors.status[key] || colors.status.pending;
   return (
     <View style={[styles.badge, { backgroundColor: bgColor }]}>
       <Text style={[styles.badgeText, { color: textColor }]}>
-        {status || 'Pending'}
+        {label || status || 'Pending'}
       </Text>
     </View>
   );

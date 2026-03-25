@@ -14,6 +14,7 @@ import { Feather } from '@expo/vector-icons';
 import { ScreenHeader, Card, StatusBadge } from '../../components';
 import { useAuth } from '../../context/AuthContext';
 import { supabase } from '../../lib/supabase';
+import { formatDateRangeDisplay, formatTimeDisplay } from '../../lib/dateTime';
 import { colors, spacing, typography, borderRadius, shadows } from '../../theme';
 
 export default function StudentDashboard({ navigation }) {
@@ -96,6 +97,20 @@ export default function StudentDashboard({ navigation }) {
     { label: 'View Fee Status', icon: 'credit-card', screen: 'FeePayment', color: colors.status.approved },
   ];
 
+  function getRequestBadge(req) {
+    const parentStatus = String(req?.parent_status || '').toLowerCase();
+    const finalStatus = String(req?.final_status || '').toLowerCase();
+
+    if (parentStatus === 'rejected' && finalStatus !== 'approved') {
+      return { status: 'rejected', label: 'Parent Rejected' };
+    }
+
+    return {
+      status: req?.final_status || req?.status || 'Pending',
+      label: null,
+    };
+  }
+
   return (
     <View style={styles.flex}>
       <ScreenHeader title="Student Portal" subtitle={`Welcome, ${user?.email || 'Student'}`} />
@@ -107,7 +122,7 @@ export default function StudentDashboard({ navigation }) {
       >
         {lastUpdatedAt ? (
           <Text style={styles.lastUpdated}>
-            Last updated at {lastUpdatedAt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+            Last updated at {formatTimeDisplay(lastUpdatedAt)}
           </Text>
         ) : null}
         {/* Hostel Status */}
@@ -146,17 +161,19 @@ export default function StudentDashboard({ navigation }) {
         {recentRequests.length === 0 ? (
           <Text style={styles.empty}>No recent requests</Text>
         ) : (
-          recentRequests.map((req) => (
+          recentRequests.map((req) => {
+            const badge = getRequestBadge(req);
+            return (
             <Card key={req.request_id} style={styles.requestCard}>
               <View style={styles.requestRow}>
                 <Text style={styles.requestReason}>{req.reason || 'Movement Request'}</Text>
-                <StatusBadge status={req.final_status || req.status} />
+                <StatusBadge status={badge.status} label={badge.label} />
               </View>
               <Text style={styles.requestDate}>
-                {req.leave_date} — {req.return_date}
+                {formatDateRangeDisplay(req.leave_date, req.return_date)}
               </Text>
             </Card>
-          ))
+          )})
         )}
       </ScrollView>
     </View>

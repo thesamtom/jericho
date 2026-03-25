@@ -14,6 +14,7 @@ import { useFocusEffect } from '@react-navigation/native';
 import { ScreenHeader, Card, StatusBadge } from '../../components';
 import { useAuth } from '../../context/AuthContext';
 import { supabase } from '../../lib/supabase';
+import { formatDateTimeDisplay, formatTimeDisplay } from '../../lib/dateTime';
 import { colors, spacing, typography, borderRadius } from '../../theme';
 
 const STATUS_OPTIONS = [
@@ -77,23 +78,6 @@ function parseTimestamp(value) {
 
   const parsed = new Date(input);
   return Number.isNaN(parsed.getTime()) ? null : parsed;
-}
-
-function formatDateTime(value) {
-  const date = parseTimestamp(value);
-  if (!date) return 'Unknown time';
-
-  const rendered = date.toLocaleString('en-IN', {
-    timeZone: 'Asia/Kolkata',
-    day: '2-digit',
-    month: '2-digit',
-    year: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-    hour12: true,
-  });
-
-  return `${rendered.replace(/\bam\b/i, 'AM').replace(/\bpm\b/i, 'PM')} IST`;
 }
 
 function getISTDateKey(value) {
@@ -294,7 +278,7 @@ export default function WardenComplaintsScreen({ navigation }) {
       >
         {lastUpdatedAt ? (
           <Text style={styles.lastUpdated}>
-            Last updated at {lastUpdatedAt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+            Last updated at {formatTimeDisplay(lastUpdatedAt)}
           </Text>
         ) : null}
         <Card style={styles.filterCard}>
@@ -338,7 +322,7 @@ export default function WardenComplaintsScreen({ navigation }) {
                   </Text>
 
                   <Text style={styles.dateText}>
-                    {formatDateTime(item.created_at)}
+                    {formatDateTimeDisplay(item.created_at)}
                   </Text>
 
                   <Text style={styles.statusText}>{formatStatus(item.status)}</Text>

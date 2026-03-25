@@ -12,6 +12,7 @@ import {
 } from 'react-native';
 import { ScreenHeader, Card, PrimaryButton } from '../../components';
 import { supabase } from '../../lib/supabase';
+import { formatDateTimeDisplay, formatTimeDisplay } from '../../lib/dateTime';
 import { colors, spacing, typography, borderRadius } from '../../theme';
 
 const STATUS_OPTIONS = [
@@ -32,42 +33,6 @@ function complaintTitle(complaint) {
   const text = complaintBody(complaint);
   const line = String(text).split('\n').find((part) => part.trim().length > 0) || '';
   return line.trim() || 'Complaint';
-}
-
-function parseTimestamp(value) {
-  if (!value) return null;
-
-  if (value instanceof Date) {
-    return Number.isNaN(value.getTime()) ? null : value;
-  }
-
-  const raw = String(value).trim();
-  if (!raw) return null;
-
-  // If timezone is missing (common for timestamp without time zone), parse as UTC.
-  const hasTimezone = /(?:Z|[+-]\d{2}:?\d{2})$/i.test(raw);
-  const normalized = raw.includes('T') ? raw : raw.replace(' ', 'T');
-  const input = hasTimezone ? normalized : `${normalized}Z`;
-
-  const parsed = new Date(input);
-  return Number.isNaN(parsed.getTime()) ? null : parsed;
-}
-
-function formatDateTime(value) {
-  const date = parseTimestamp(value);
-  if (!date) return 'Unknown';
-
-  const rendered = date.toLocaleString('en-IN', {
-    timeZone: 'Asia/Kolkata',
-    day: '2-digit',
-    month: '2-digit',
-    year: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-    hour12: true,
-  });
-
-  return `${rendered.replace(/\bam\b/i, 'AM').replace(/\bpm\b/i, 'PM')} IST`;
 }
 
 export default function WardenComplaintDetailScreen({ route, navigation }) {
@@ -192,7 +157,7 @@ export default function WardenComplaintDetailScreen({ route, navigation }) {
       >
         {lastUpdatedAt ? (
           <Text style={styles.lastUpdated}>
-            Last updated at {lastUpdatedAt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+            Last updated at {formatTimeDisplay(lastUpdatedAt)}
           </Text>
         ) : null}
         <Card>
@@ -201,7 +166,7 @@ export default function WardenComplaintDetailScreen({ route, navigation }) {
           <Text style={styles.info}>Student ID: {complaint?.student_id || '—'}</Text>
           <Text style={styles.info}>Room: {roomValue}</Text>
           <Text style={styles.info}>
-            Submitted: {formatDateTime(complaint?.created_at)}
+            Submitted: {formatDateTimeDisplay(complaint?.created_at)}
           </Text>
 
           <Text style={styles.sectionHeading}>Full Description</Text>
