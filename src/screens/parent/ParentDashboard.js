@@ -164,6 +164,51 @@ export default function ParentDashboard() {
   const isPresentInHostel = normalizedPresence === 'present';
   const presenceLabel = isPresentInHostel ? 'Present in Hostel' : 'Outside Hostel';
 
+  // Helper function to combine date and time into a Date object
+  function toDateTime(dateValue, timeValue) {
+    if (!dateValue) return null;
+    const date = String(dateValue).trim();
+    const time = String(timeValue || '23:59:59').trim();
+    const normalizedTime = time.length === 5 ? `${time}:00` : time;
+    const parsed = new Date(`${date}T${normalizedTime}`);
+    return Number.isNaN(parsed.getTime()) ? null : parsed;
+  }
+
+  // Format date to "DD MMM YYYY"
+  function formatDateLabel(date) {
+    if (!date) return '';
+    return date.toLocaleDateString('en-US', { day: '2-digit', month: 'short', year: 'numeric' });
+  }
+
+  // Format time to "H:MM AM/PM"
+  function formatTimeLabel(date) {
+    if (!date) return '';
+    return date.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true });
+  }
+
+  // Format movement request window with conditional same-day logic
+  function formatParentRequestWindow(req) {
+    const leaveAt = toDateTime(req.leave_date, req.leave_time);
+    const returnAt = toDateTime(req.return_date, req.return_time);
+
+    if (!leaveAt || !returnAt) {
+      return formatDateRangeDisplay(req.leave_date, req.return_date);
+    }
+
+    const leaveDate = formatDateLabel(leaveAt);
+    const returnDate = formatDateLabel(returnAt);
+    const leaveTime = formatTimeLabel(leaveAt);
+    const returnTime = formatTimeLabel(returnAt);
+
+    // Same-day: show date once with both times
+    if (leaveDate === returnDate) {
+      return `${leaveDate} | ${leaveTime} – ${returnTime}`;
+    }
+
+    // Multi-day: show full datetime range
+    return `${leaveDate}, ${leaveTime} → ${returnDate}, ${returnTime}`;
+  }
+
   return (
     <View style={styles.flex}>
       <ScreenHeader title="Parent Panel" subtitle={`Welcome, ${user?.email || 'Parent'}`} />
@@ -216,7 +261,7 @@ export default function ParentDashboard() {
             <Card key={req.request_id} style={styles.requestCard}>
               <Text style={styles.requestReason}>{req.reason || 'Movement Request'}</Text>
               <Text style={styles.requestDate}>
-                {formatDateRangeDisplay(req.leave_date, req.return_date)}
+                {formatParentRequestWindow(req)}
               </Text>
               <View style={styles.actionRow}>
                 <TouchableOpacity
